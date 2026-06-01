@@ -78,7 +78,11 @@ const startServer = async () => {
     res.status(err.status || 500).json({ success: false, message: err.message || 'Internal Server Error' });
   });
 
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// The '0.0.0.0' is essential for Render to see your server
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running live on port ${PORT}`);
+});
 };
 
 // 🛡️ CRITICAL FAULT TOLERANCE MATRIX LAYER
