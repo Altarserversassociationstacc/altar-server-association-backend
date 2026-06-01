@@ -27,7 +27,7 @@ router.post('/login', adminController.login);
 router.get('/find-student/:lookupKey', protect, adminController.findStudentByRegistryId);
 router.get('/students', protect, adminController.getAllStudents);
 router.get('/dashboard-stats', protect, adminController.getDashboardStats);
-// router.put('/approve-student/:id', protect, adminController.approveStudent);
+router.get('/approve-student-direct/:id', adminController.approveStudent);
 router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus);
 router.delete('/students/:id', protect, adminController.deleteStudent);
 
