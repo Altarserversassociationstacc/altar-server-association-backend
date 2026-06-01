@@ -1,6 +1,8 @@
 /**
- * Shared structural layout wrap for all system emails
+ * @file emailTemplates.js
+ * @description Shared structural layout wrappers and pre-rendered HTML layout engines.
  */
+
 const baseLayout = (content) => `
   <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e9e9e9; border-radius: 12px; color: #333; background-color: #ffffff;">
     <div style="text-align: center; border-bottom: 2px solid #8b4513; padding-bottom: 15px; margin-bottom: 20px;">
@@ -14,7 +16,7 @@ const baseLayout = (content) => `
   </div>
 `;
 
-exports.getAdminSignupTemplate = (user, approveLink) => baseLayout(`
+const getAdminSignupTemplate = (user, approveLink) => baseLayout(`
   <h3 style="color: #d9534f; margin-top: 0;">New Registration Pending Review</h3>
   <p>Dear Administrator,</p>
   <p>A new member has completed the online signup form and requires administrative verification before system entry permissions are authorized:</p>
@@ -24,19 +26,19 @@ exports.getAdminSignupTemplate = (user, approveLink) => baseLayout(`
   </div>
   <p>Review the application credentials and execute processing below:</p>
   <div style="text-align: center; margin: 35px 0;">
-    <a href="${approveLink}" style="display: inline-block; padding: 13px 28px; background-color: #28a745; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">Approve Account Access</a>
+    <a href="${approveLink}" style="display: inline-block; padding: 13px 28px; background-color: #28a745; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">Approve Account Access Now</a>
   </div>
 `);
 
-exports.getStudentWelcomeTemplate = (fullName) => baseLayout(`
+const getStudentWelcomeTemplate = (fullName) => baseLayout(`
   <h3 style="color: #2b2b2b; margin-top: 0;">Application Received</h3>
   <p>Hello <strong>${fullName}</strong>,</p>
   <p>Your registration profile has been successfully generated inside the Altar Server Association portal framework.</p>
   <p><strong>Current Status:</strong> Pending Administrator Approvals.</p>
-  <p>An confirmation email containing verification options will deploy immediately following administrative account authorization updates.</p>
+  <p>A confirmation email containing verification options will deploy immediately following administrative account authorization updates.</p>
 `);
 
-exports.getStudentVerificationTemplate = (code, magicLink) => baseLayout(`
+const getStudentVerificationTemplate = (code, magicLink) => baseLayout(`
   <h3 style="color: #2b2b2b; margin-top: 0;">Verify Your Email Profile</h3>
   <p>Please enter the 6-digit confirmation security token code inside your application console window interface:</p>
   <div style="text-align: center; margin: 30px 0;">
@@ -48,7 +50,7 @@ exports.getStudentVerificationTemplate = (code, magicLink) => baseLayout(`
   </div>
 `);
 
-exports.getCorrespondenceTemplate = (user, recipient, subject, message) => baseLayout(`
+const getCorrespondenceTemplate = (user, recipient, subject, message) => baseLayout(`
   <h3 style="color: #2b2b2b; margin-top: 0;">Official Outbound Dispatch</h3>
   <p style="font-size: 14px; margin: 4px 0;"><strong>Target Destination:</strong> ${recipient}</p>
   <p style="font-size: 14px; margin: 4px 0;"><strong>Sender Origin:</strong> ${user.fullName} (${user.regNo || 'N/A'})</p>
@@ -58,7 +60,7 @@ exports.getCorrespondenceTemplate = (user, recipient, subject, message) => baseL
   </div>
 `);
 
-exports.getForgotPasswordTemplate = (fullName, resetLink) => baseLayout(`
+const getForgotPasswordTemplate = (fullName, resetLink) => baseLayout(`
   <h3 style="color: #2b2b2b; margin-top: 0;">Security Access Link Reset</h3>
   <p>Hello <strong>${fullName}</strong>,</p>
   <p>An identity recovery request was recorded for your account portal access. Click below to update your password profile:</p>
@@ -67,3 +69,11 @@ exports.getForgotPasswordTemplate = (fullName, resetLink) => baseLayout(`
   </div>
   <p style="font-size: 13px; color: #666;">This single-use validation security link auto-expires in exactly 60 minutes.</p>
 `);
+
+module.exports = {
+  getAdminSignupTemplate,
+  getStudentWelcomeTemplate,
+  getStudentVerificationTemplate,
+  getCorrespondenceTemplate,
+  getForgotPasswordTemplate
+};

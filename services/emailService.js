@@ -1,12 +1,9 @@
+/**
+ * @file emailService.js
+ * @description Core engine to send email via Google Gmail OAuth2 API
+ */
 const { google } = require('googleapis');
 
-/**
- * Core engine to send email via Google Gmail OAuth2 API
- * @param {string|string[]} to - Recipient(s) email address
- * @param {string} subject - Email Subject
- * @param {string} htmlContent - Pre-rendered HTML template string
- * @param {string|null} replyToEmail - Optional reply-to header field
- */
 const sendOAuth2Email = async (to, subject, htmlContent, replyToEmail = null) => {
   const recipient = Array.isArray(to) ? to.join(', ') : to;
   try {
@@ -46,7 +43,7 @@ const sendOAuth2Email = async (to, subject, htmlContent, replyToEmail = null) =>
     return res.data;
   } catch (error) {
     console.error("[Email Service Error]:", error.response?.data || error.message);
-    throw error; // Essential for the controller to catch the failure
+    throw error;
   }
 };
 
