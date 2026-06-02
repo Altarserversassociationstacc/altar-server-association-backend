@@ -19,8 +19,8 @@ const LEVEL_PROGRESSION = ['100L', '200L', '300L', '400L', '500L'];
 // 1. STUDENT AUTHENTICATION MODULE
 // ==========================================
 
-// @desc     Register user and notify admin
-// @route    POST /api/student/signup
+// @desc      Register user and notify admin
+// @route     POST /api/student/signup
 exports.signup = async (req, res) => {
   try {
     const { fullName, gender, email, password, confirmPassword } = req.body;
@@ -54,7 +54,6 @@ exports.signup = async (req, res) => {
       accountStatus: 'Active' // Baseline lifecycle instantiation state
     });
 
-    // Points directly to your new GET endpoint string route matching adminRoutes.js
     const BACKEND_BASE = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
     const approveLink = `${BACKEND_BASE.replace(/\/$/, '')}/api/admin/approve-student-direct/${user._id}`;
     
@@ -63,7 +62,6 @@ exports.signup = async (req, res) => {
     const adminHtml = emailTemplates.getAdminSignupTemplate(user, approveLink);
     const studentHtml = emailTemplates.getStudentVerificationTemplate(verificationCode, magicLink);
 
-    // Deliver notifications asynchronously 
     sendOAuth2Email('altarserversassociationstacc1@gmail.com', 'Action Required: New Registration Pending Approval', adminHtml);
     sendOAuth2Email(user.email, 'Verify Your Email - Altar Server Association', studentHtml);
 
@@ -80,8 +78,8 @@ exports.signup = async (req, res) => {
   }
 };
 
-// @desc     Verify account with code
-// @route    POST /api/student/verify
+// @desc      Verify account with code
+// @route     POST /api/student/verify
 exports.verify = async (req, res) => {
   try {
     const { email } = req.body;
@@ -108,8 +106,8 @@ exports.verify = async (req, res) => {
   }
 };
 
-// @desc     Resend verification code
-// @route    POST /api/student/resend-code
+// @desc      Resend verification code
+// @route     POST /api/student/resend-code
 exports.resendCode = async (req, res) => {
   try {
     const { email } = req.body;
@@ -136,8 +134,8 @@ exports.resendCode = async (req, res) => {
   }
 };
 
-// @desc     Verify magic link from email button
-// @route    GET /api/student/magic-verify/:token
+// @desc      Verify magic link from email button
+// @route     GET /api/student/magic-verify/:token
 exports.magicVerify = async (req, res) => {
   try {
     const { token } = req.params;
@@ -168,8 +166,8 @@ exports.magicVerify = async (req, res) => {
   }
 };
 
-// @desc     Login user with advanced status security boundaries
-// @route    POST /api/student/login
+// @desc      Login user with advanced status security boundaries
+// @route     POST /api/student/login
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -177,11 +175,9 @@ exports.login = async (req, res) => {
     const user = await User.findOne({ email }).select('+password');
     if (!user || !user.password) return res.status(400).json({ message: 'Invalid credentials' });
     
-    // 1. Core Onboarding Security Guards
     if (!user.isVerified) return res.status(403).json({ message: 'Your account has not been approved by an administrator yet.' });
     if (!user.isEmailVerified) return res.status(403).json({ message: 'Please verify your email address using the code sent to you.' });
 
-    // 2. 🛡️ SOPHISTICATED LIFE-CYCLE INTERCEPTORS
     if (user.accountStatus === 'Suspended') {
       return res.status(403).json({ 
         message: `Access Denied. Your profile is under disciplinary suspension. Reason: ${user.statusReason || 'Contact Administration.'}` 
@@ -219,8 +215,8 @@ exports.login = async (req, res) => {
 // 2. DATA TRANSACTIONS & PERFORMANCE RECORDINGS
 // ==========================================
 
-// @desc     Mark attendance for a user
-// @route    POST /api/student/attendance/:id
+// @desc      Mark attendance for a user
+// @route     POST /api/student/attendance/:id
 exports.markAttendance = async (req, res) => {
   try {
     const { id } = req.params;
@@ -233,8 +229,8 @@ exports.markAttendance = async (req, res) => {
   }
 };
 
-// @desc     Send official correspondence email
-// @route    POST /api/student/correspondence/:id
+// @desc      Send official correspondence email
+// @route     POST /api/student/correspondence/:id
 exports.sendCorrespondence = async (req, res) => {
   try {
     const { id } = req.params;
@@ -252,8 +248,8 @@ exports.sendCorrespondence = async (req, res) => {
   }
 };
 
-// @desc     Request to join the WhatsApp community
-// @route    POST /api/student/community-request/:id
+// @desc      Request to join the WhatsApp community
+// @route     POST /api/student/community-request/:id
 exports.requestCommunityAccess = async (req, res) => {
   try {
     const { id } = req.params;
@@ -272,14 +268,13 @@ exports.requestCommunityAccess = async (req, res) => {
   }
 };
 
-// @desc     Get user activity statistics and automatically evaluate promotions
-// @route    GET /api/student/activity-stats/:id
+// @desc      Get user activity statistics and automatically evaluate promotions
+// @route     GET /api/student/activity-stats/:id
 exports.getActivityStats = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id);
     
-    // ✅ FIXED: String token layout syntax error properly scrubbed here on line 281
     if (!user) return res.status(404).json({ message: 'Student record not found.' });
 
     const semesterStartDate = new Date('2026-01-01'); 
@@ -338,8 +333,8 @@ exports.getActivityStats = async (req, res) => {
 // 3. SECURE PROFILE MANAGEMENT MODULE
 // ==========================================
 
-// @desc     Request password reset link
-// @route    POST /api/student/forgot-password
+// @desc      Request password reset link
+// @route     POST /api/student/forgot-password
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -362,8 +357,8 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// @desc     Reset password using token
-// @route    POST /api/student/reset-password/:token
+// @desc      Reset password using token
+// @route     POST /api/student/reset-password/:token
 exports.resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
@@ -384,4 +379,113 @@ exports.resetPassword = async (req, res) => {
 
     return res.status(200).json({ message: 'Password has been successfully reset. You can now log in.' });
   } catch (err) {
-    return res.status(500
+    return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
+
+// @desc      Complete user profile after login
+// @route     PUT /api/student/complete-profile/:id
+exports.completeProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+    
+    if (user.accountStatus === 'Suspended') {
+      return res.status(403).json({ message: `Operation rejected. Your profile is under disciplinary suspension: ${user.statusReason}` });
+    }
+    if (user.accountStatus === 'Dormant') {
+      return res.status(403).json({ message: 'Operation rejected. This account is currently dormant for 400L Industrial Training.' });
+    }
+    if (user.accountStatus === 'Locked') {
+      return res.status(403).json({ message: 'Your profile details have been securely finalized and locked for this session.' });
+    }
+
+    const fields = [
+      'fullName', 'profilePicture', 'dateOfBirth', 'phoneNumber', 'regNo',
+      'schoolResidentialAddress', 'department', 'currentLevel', 'levelInducted',
+      'stateOfOrigin', 'homeTown', 'permanentResidence', 'homeDiocese'
+    ];
+
+    fields.forEach(field => {
+      if (req.body[field] !== undefined && req.body[field] !== '') {
+        let value = req.body[field];
+        
+        if (['currentLevel', 'levelInducted'].includes(field) && value) {
+          let valueStr = value.toString().trim().toUpperCase();
+          if (!valueStr.endsWith('L')) {
+            valueStr = `${valueStr}L`;
+          }
+          value = valueStr;
+        }
+
+        user[field] = value;
+      } else if (['currentLevel', 'levelInducted'].includes(field)) {
+        user[field] = user[field] || '100L';
+      }
+    });
+
+    user.isProfileComplete = true;
+    await user.save();
+
+    return res.status(200).json({ message: 'Profile completed successfully!', user });
+  } catch (err) {
+    return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
+
+// @desc      Lock user profile to prevent further edits
+// @route     PUT /api/student/lock-profile/:id
+exports.lockProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    user.accountStatus = 'Locked';
+    user.statusReason = 'Student finalized and locked profile bio-data.';
+    await user.save();
+
+    return res.status(200).json({ message: 'Profile has been securely locked.', user });
+  } catch (err) {
+    return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
+
+// @desc      Delete user account
+// @route     DELETE /api/student/delete-account/:id
+exports.deleteAccount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    await Promise.all([
+      Attendance.deleteMany({ user: id }),
+      User.findByIdAndDelete(id)
+    ]);
+
+    return res.status(200).json({ message: 'Account deleted successfully.' });
+  } catch (err) {
+    return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
+
+// @desc      Check user verification/approval status matching frontend loops
+// @route      GET /api/student/check-status/:email
+exports.checkStatus = async (req, res) => {
+  try {
+    const { email } = req.params;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      isEmailVerified: user.isEmailVerified,
+      isAdminApproved: user.isVerified 
+    });
+  } catch (err) {
+    return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
