@@ -69,6 +69,36 @@ const sendStudentEmail = async (user, loginLink, code, magicLink, otpPageLink) =
 };
 
 // ==========================================
+// SHARED VISUAL INTERFACE RESPONSES (HTML)
+// ==========================================
+const renderApprovalScreen = (user) => `
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 550px; margin: 60px auto; padding: 40px; border: 1px solid #c3e6cb; border-radius: 16px; background-color: #d4edda; color: #155724; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+    <div style="text-align: center; margin-bottom: 20px;">
+      <span style="font-size: 50px;">🎉</span>
+    </div>
+    <h1 style="margin-top: 0; font-size: 26px; text-align: center; color: #155724;">Administrative Approval Successful</h1>
+    
+    <hr style="border: 0; height: 1px; background: #c3e6cb; margin: 25px 0;" />
+    
+    <div style="font-size: 15px; line-height: 1.6; color: #1c602c;">
+      <p style="margin: 10px 0;"><strong>Candidate Name:</strong> ${user.fullName}</p>
+      <p style="margin: 10px 0;"><strong>Email Address:</strong> ${user.email}</p>
+      <p style="margin: 25px 0 0 0; text-align: center; font-weight: 600; font-size: 14px; background: rgba(255,255,255,0.6); padding: 12px; border-radius: 8px; border: 1px dashed #b1dfbb;">
+        The account state has shifted to active. Automated dispatch systems have successfully cleared verification options to the student.
+      </p>
+    </div>
+  </div>
+`;
+
+const renderErrorScreen = (title, message) => `
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border: 1px solid #f5c6cb; border-radius: 12px; background-color: #f8d7da; color: #721c24; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+    <h1 style="margin-top: 0; font-size: 24px;">${title}</h1>
+    <hr style="border: 0; height: 1px; background: #f5c6cb; margin: 15px 0;" />
+    <p style="font-size: 15px; line-height: 1.5;">${message}</p>
+  </div>
+`;
+
+// ==========================================
 // 1. ADMINISTRATIVE AUTHENTICATION ENGINE
 // ==========================================
 
@@ -167,10 +197,10 @@ exports.approve = async (req, res) => {
     const { token } = req.params;
     const user = await User.findOne({ verificationToken: token });
     if (!user) {
-      return res.status(404).send('<h1>Invalid or Expired Link</h1><p>This approval link is invalid or has already been used.</p>');
+      return res.status(404).send(renderErrorScreen('Link Invalid', 'This approval link is invalid or has already been used.'));
     }
     if (Date.now() > user.codeExpires) {
-      return res.status(400).send('<h1>Link Expired</h1><p>This approval link has expired.</p>');
+      return res.status(400).send(renderErrorScreen('Link Expired', 'This approval link has expired. Please ask the candidate to trigger a resend code.'));
     }
 
     user.isVerified = true;
@@ -189,10 +219,9 @@ exports.approve = async (req, res) => {
       isRead: false
     });
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
+    return res.status(200).send(renderApprovalScreen(user));
   } catch (err) {
-    return res.status(500).send('<h1>Approval failed</h1><p>' + err.message + '</p>');
+    return res.status(500).send(renderErrorScreen('System Error', err.message));
   }
 };
 
@@ -203,22 +232,34 @@ exports.approve = async (req, res) => {
 exports.approveStudent = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ success: false, message: 'Invalid ID format.' });
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).send(renderErrorScreen('Invalid Parameter', 'The structural student identification document format is invalid.'));
+    }
 
-    const student = await User.findByIdAndUpdate(id, { $set: { isVerified: true } }, { new: true }).select('-password');
-    if (!student) return res.status(404).json({ success: false, message: 'Student document not found.' });
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).send(renderErrorScreen('Not Found', 'The requested student record entry could not be resolved.'));
+    }
+
+    user.isVerified = true;
+    await user.save();
+
+    const loginLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/login`;
+    const magicLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-magic/${user.verificationToken}`;
+    const otpPageLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-email`;
+
+    await sendStudentEmail(user, loginLink, user.verificationCode, magicLink, otpPageLink);
 
     await Notification.create({
-      recipient: student._id,
+      recipient: user._id,
       title: "Account Officially Approved 🎉",
       message: "Welcome! Your sanctuary access has been granted by the administration.",
       isRead: false
     });
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(student.email)}&approved=true`);
+    return res.status(200).send(renderApprovalScreen(user));
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Approval Failed: ' + err.message });
+    return res.status(500).send(renderErrorScreen('System Error', err.message));
   }
 };
 
@@ -340,7 +381,7 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
     let standing = 'Very Poor';
     if (overallPercent >= 90) standing = 'Very Good';
     else if (overallPercent >= 70) standing = 'Good';
-    else if (overallPercent >= 50) standing = 'Poor';
+    else if (overallPercent >= 50) standing = 'Fair';
 
     await User.findByIdAndUpdate(studentId, {
       $set: {
