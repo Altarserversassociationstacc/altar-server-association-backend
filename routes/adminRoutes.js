@@ -15,10 +15,12 @@ router.get('/find-student/:lookupKey', protect, adminController.findStudentByReg
 router.get('/students', protect, adminController.getAllStudents);
 router.get('/dashboard-stats', protect, adminController.getDashboardStats);
 
-// ✅ BOTH ROUTING LIFECYCLES ARE NOW ACTIVE AT THE SAME TIME
-router.get('/approve/:token', adminController.approve); // Intercepts historical email links cleanly
-router.get('/approve-student-direct/:id', adminController.approveStudent); // Intercepts direct ID email links
 
+// 1. Handles historical/old email links (This fixes your current error)
+router.get('/approve/:token', adminController.approve);
+
+// 2. Handles the new direct-ID links
+router.get('/approve-student-direct/:id', adminController.approveStudent);
 router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus);
 router.delete('/students/:id', protect, adminController.deleteStudent);
 
