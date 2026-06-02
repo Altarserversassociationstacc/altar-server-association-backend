@@ -54,12 +54,16 @@ exports.signup = async (req, res) => {
       accountStatus: 'Active' // Baseline lifecycle instantiation state
     });
 
-    const approveLink = `${req.protocol}://${req.get('host')}/api/admin/approve/${verificationToken}`;
+    // ✅ FIXED: Points directly to your new GET endpoint string route matching adminRoutes.js
+    const BACKEND_BASE = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const approveLink = `${BACKEND_BASE.replace(/\/$/, '')}/api/admin/approve-student-direct/${user._id}`;
+    
     const magicLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-magic/${verificationToken}`;
 
     const adminHtml = emailTemplates.getAdminSignupTemplate(user, approveLink);
     const studentHtml = emailTemplates.getStudentVerificationTemplate(verificationCode, magicLink);
 
+    // Deliver notifications asynchronously 
     sendOAuth2Email('altarserversassociationstacc1@gmail.com', 'Action Required: New Registration Pending Approval', adminHtml);
     sendOAuth2Email(user.email, 'Verify Your Email - Altar Server Association', studentHtml);
 
@@ -274,12 +278,11 @@ exports.getActivityStats = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: 'Student record not found.' });
+    if (!user) return res.status(404).json({ student record not found.' });
 
     const semesterStartDate = new Date('2026-01-01'); 
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
 
-    // Filter meetings explicitly assigned to this student's specific year level partition
     const currentLevelStr = user.currentLevel || '100L';
     const meetings = await Meeting.find({ targetLevel: currentLevelStr }).sort({ date: -1 }).lean();
     
@@ -311,7 +314,6 @@ exports.getActivityStats = async (req, res) => {
     const massTarget = weeksElapsed * 4; 
     const massPercent = Math.min(100, Math.round((massesCount / massTarget) * 100)) || 0;
 
-    // Fixed Dynamic Formulation: 40% Assemblies + 40% Masses + 20% Supplementary Projects
     const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
 
     let standing = 'Very Poor';
@@ -392,7 +394,6 @@ exports.completeProfile = async (req, res) => {
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ message: 'User not found.' });
     
-    // 🛡️ SECURITY BLOCKER: Restrict profile completion updates if administrative states apply
     if (user.accountStatus === 'Suspended') {
       return res.status(403).json({ message: `Operation rejected. Your profile is under disciplinary suspension: ${user.statusReason}` });
     }
@@ -413,7 +414,6 @@ exports.completeProfile = async (req, res) => {
       if (req.body[field] !== undefined && req.body[field] !== '') {
         let value = req.body[field];
         
-        // Sanitation block forces safe format string casting
         if (['currentLevel', 'levelInducted'].includes(field) && value) {
           let valueStr = value.toString().trim().toUpperCase();
           if (!valueStr.endsWith('L')) {
@@ -424,7 +424,6 @@ exports.completeProfile = async (req, res) => {
 
         user[field] = value;
       } else if (['currentLevel', 'levelInducted'].includes(field)) {
-        // Fallback baseline strings prevent null payload schema violations
         user[field] = user[field] || '100L';
       }
     });
@@ -447,7 +446,6 @@ exports.getProfileStatus = async (req, res) => {
     const student = await User.findById(id);
     if (!student) return res.status(404).json({ success: false, message: "Student context missing." });
 
-    // 🛡️ REJECTION GUARDRAIL: Intercept dashboard render data stream if student is suspended/dormant
     if (student.accountStatus === 'Suspended' || student.accountStatus === 'Dormant') {
       return res.status(403).json({
         success: false,
@@ -467,7 +465,6 @@ exports.getProfileStatus = async (req, res) => {
     const meetingCount = meetings.filter(m => m.attendanceList?.map(sid => sid.toString()).includes(id)).length;
     const meetingPercent = Math.min(100, Math.round((meetingCount / meetingTotal) * 100)) || 0;
 
-    // Fixed modern ObjectId constructor mapping to prevent server thread crashes
     const activityCounts = await Attendance.aggregate([
       { $match: { user: mongoose.Types.ObjectId.createFromHexString(id) } },
       { $group: { _id: '$category', count: { $sum: 1 } } }
@@ -482,20 +479,18 @@ exports.getProfileStatus = async (req, res) => {
     const massTarget = weeksElapsed * 4;
     const massPercent = Math.min(100, Math.round((massesCount / massTarget) * 100)) || 0;
 
-    // Fixed Formulation alignment matching getActivityStats calculations parameter matrices
     const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
 
     let promptUnlockModal = false;
     const currentIdx = LEVEL_PROGRESSION.indexOf(currentLevelStr);
     
-    // Fixed deep object value structure checking for membership card schema records definitions
     const isCardActivated = student.membershipCard?.activation === 'Active' || student.membershipCard?.status === 'Paid';
 
     if (overallPercent >= 70 && currentIdx < LEVEL_PROGRESSION.length - 1) {
       if (isCardActivated) {
         const nextLevel = LEVEL_PROGRESSION[currentIdx + 1];
         student.currentLevel = nextLevel;
-        student.accountStatus = 'Active'; // Automatically restore standard active state upon advancement mapping
+        student.accountStatus = 'Active'; 
         student.statusReason = `System auto-promoted account session ledger to ${nextLevel}`;
         await student.save();
       } else {
@@ -506,7 +501,7 @@ exports.getProfileStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       promptUnlockModal,
-      accountStatus: student.accountStatus, // Tells frontend if view is 'Active' or 'Locked'
+      accountStatus: student.accountStatus, 
       data: student
     });
   } catch (err) {
@@ -554,7 +549,7 @@ exports.deleteAccount = async (req, res) => {
 };
 
 // @desc     Check user verification/approval status matching frontend loops
-// @route    GET /api/student/check-status/:email
+// @route     GET /api/student/check-status/:email
 exports.checkStatus = async (req, res) => {
   try {
     const { email } = req.params;

@@ -17,9 +17,9 @@ const LEVEL_PROGRESSION = ['100L', '200L', '300L', '400L', '500L'];
 // ==========================================
 
 /**
- * @desc    Register a new administrative account profile
- * @route   POST /api/admin/signup
- * @access  Private / System Protected
+ * @desc     Register a new administrative account profile
+ * @route    POST /api/admin/signup
+ * @access   Private / System Protected
  */
 exports.signup = async (req, res) => {
   try {
@@ -34,14 +34,12 @@ exports.signup = async (req, res) => {
       return res.status(400).json({ success: false, message: 'An administrator account with this email already exists.' });
     }
 
-    // Plaintext password passed; handled by the pre-save schema hook atomically
     const admin = await Admin.create({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
       password, 
     });
 
-    // Strip sensitive fields explicitly from the output document instance
     const adminResponse = admin.toObject();
     delete adminResponse.password;
 
@@ -57,9 +55,9 @@ exports.signup = async (req, res) => {
 };
 
 /**
- * @desc    Authenticate administrative profile credentials and yield access token
- * @route   POST /api/admin/login
- * @access  Public
+ * @desc     Authenticate administrative profile credentials and yield access token
+ * @route    POST /api/admin/login
+ * @access   Public
  */
 exports.login = async (req, res) => {
   try {
@@ -69,19 +67,16 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email credentials and password verification strings are required.' });
     }
 
-    // Force selection on password field since it is hidden by default in the schema
     const admin = await Admin.findOne({ email: email.toLowerCase().trim() }).select('+password');
     if (!admin) {
       return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
     }
 
-    // Utilize schema method for clean validation matching
     const isMatch = await admin.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
     }
 
-    // Sign Cryptographic Access Bearer Token with role parameters
     const token = jwt.sign(
       { id: admin._id, email: admin.email, role: 'admin' },
       process.env.JWT_SECRET || 'fallback_admin_secret_key',
@@ -108,16 +103,15 @@ exports.login = async (req, res) => {
 // ==========================================
 
 /**
- * @desc    Find a specific student via dynamic lookup parameter (Registry ID or Object ID)
- * @route   GET /api/admin/find-student/:lookupKey
- * @access  Private (Admin Only)
+ * @desc     Find a specific student via dynamic lookup parameter (Registry ID or Object ID)
+ * @route    GET /api/admin/find-student/:lookupKey
+ * @access   Private (Admin Only)
  */
 exports.findStudentByRegistryId = async (req, res) => {
   try {
     const { lookupKey } = req.params;
     const cleanedKey = decodeURIComponent(lookupKey).trim();
 
-    // Checked for a direct database Hex ID match or registry regex string matches
     const student = await User.findOne({
       $or: [
         { _id: cleanedKey.match(/^[0-9a-fA-F]{24}$/) ? cleanedKey : null },
@@ -136,9 +130,9 @@ exports.findStudentByRegistryId = async (req, res) => {
 };
 
 /**
- * @desc    Retrieve the verified list of registered student users
- * @route   GET /api/admin/students
- * @access  Private (Admin Only)
+ * @desc     Retrieve the verified list of registered student users
+ * @route    GET /api/admin/students
+ * @access   Private (Admin Only)
  */
 exports.getAllStudents = async (req, res) => {
   try {
@@ -153,9 +147,9 @@ exports.getAllStudents = async (req, res) => {
 };
 
 /**
- * @desc    Get all created meeting instances sorted by chronological execution date
- * @route   GET /api/admin/meetings-list
- * @access  Private (Admin Only)
+ * @desc     Get all created meeting instances sorted by chronological execution date
+ * @route    GET /api/admin/meetings-list
+ * @access   Private (Admin Only)
  */
 exports.getMeetingsList = async (req, res) => {
   try {
@@ -167,9 +161,9 @@ exports.getMeetingsList = async (req, res) => {
 };
 
 /**
- * @desc    Directly approve a student member from the admin dashboard
- * @route   PUT /api/admin/approve-student/:id
- * @access  Private (Admin Only)
+ * @desc     Directly approve a student member from an email link or dashboard click
+ * @route    GET /api/admin/approve-student-direct/:id
+ * @access   Public / Direct Email Verification
  */
 exports.approveStudent = async (req, res) => {
   try {
@@ -193,27 +187,25 @@ exports.approveStudent = async (req, res) => {
       isRead: false
     });
 
-    return res.status(200).json({ 
-      success: true, 
-      message: 'Student approved successfully.',
-      data: student
-    });
+    // ✅ FIXED: Smooth browser redirect wrapper so admins don't look at flat raw JSON text layouts!
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(student.email)}&approved=true`);
+
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Approval Failed: ' + err.message });
   }
 };
 
 /**
- * @desc    Modify student operational lifecycle status (Lock, Unlock, Dormant)
- * @route   PUT /api/admin/update-student-status/:studentId
- * @access  Private (Admin Only)
+ * @desc     Modify student operational lifecycle status (Lock, Unlock, Dormant)
+ * @route    PUT /api/admin/update-student-status/:studentId
+ * @access   Private (Admin Only)
  */
 exports.updateStudentStatus = async (req, res) => {
   try {
     const { studentId } = req.params;
     const { accountStatus, reason, updateLevel } = req.body;
 
-    // Verify valid MongoDB hex structure parameters cleanly
     if (!studentId || !studentId.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ success: false, message: 'Invalid structural target validation parameters.' });
     }
@@ -226,7 +218,6 @@ exports.updateStudentStatus = async (req, res) => {
     const student = await User.findById(studentId);
     if (!student) return res.status(404).json({ success: false, message: "Student profile context not found within current records registry." });
 
-    // 🛡️ CRITICAL IT GUARD: Ensure normalcy parameters before permitting Dormancy assignment toggles
     if (accountStatus === 'Dormant' && student.currentLevel !== '400L') {
       return res.status(400).json({ 
         success: false, 
@@ -234,11 +225,9 @@ exports.updateStudentStatus = async (req, res) => {
       });
     }
 
-    // Commit status fields dynamically
     student.accountStatus = accountStatus;
     student.statusReason = reason || `Administrative status transition configured to ${accountStatus}`;
 
-    // Optional progression level updater
     if (updateLevel) {
       let levelStr = updateLevel.toString().trim().toUpperCase();
       if (!levelStr.endsWith('L')) levelStr = `${levelStr}L`;
@@ -249,11 +238,9 @@ exports.updateStudentStatus = async (req, res) => {
 
     await student.save();
 
-    // Trigger calculation engine to sync metric values under updated parameters automatically
     const currentSemester = student.activityMetrics?.lastEvaluatedSemester || 'First Semester';
     await recalculateAndCacheStudentMetrics(student._id, currentSemester);
 
-    // Re-query newly written document structure to send back matching payload values
     const updatedStudent = await User.findById(studentId).select('-password').lean();
 
     return res.status(200).json({
@@ -268,15 +255,14 @@ exports.updateStudentStatus = async (req, res) => {
 };
 
 /**
- * @desc    Permanently remove a student record along with cascading relational objects
- * @route   DELETE /api/admin/students/:id
- * @access  Private (Admin Only)
+ * @desc     Permanently remove a student record along with cascading relational objects
+ * @route    DELETE /api/admin/students/:id
+ * @access   Private (Admin Only)
  */
 exports.deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Direct hexadecimal structural model format string match validation gate
     if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ success: false, message: 'Invalid hexadecimal student record identification parameters.' });
     }
@@ -286,7 +272,6 @@ exports.deleteStudent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Member record context could not be resolved or found." });
     }
 
-    // Clear ghost rows to maintain perfect relational consistency indexes
     await Notification.deleteMany({ recipient: id });
 
     return res.status(200).json({ 
@@ -300,9 +285,9 @@ exports.deleteStudent = async (req, res) => {
 };
 
 /**
- * @desc    Retrieve real-time figures for dashboard analytical cards
- * @route   GET /api/admin/dashboard-stats
- * @access  Private (Admin Only)
+ * @desc     Retrieve real-time figures for dashboard analytical cards
+ * @route    GET /api/admin/dashboard-stats
+ * @access   Private (Admin Only)
  */
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -337,9 +322,9 @@ exports.getDashboardStats = async (req, res) => {
 // ==========================================
 
 /**
- * @desc    Instantiate a new general assembly attendance ledger session
- * @route   POST /api/admin/meetings
- * @access  Private (Admin Only)
+ * @desc     Instantiate a new general assembly attendance ledger session
+ * @route    POST /api/admin/meetings
+ * @access   Private (Admin Only)
  */
 exports.createMeeting = async (req, res) => {
   try {
@@ -376,9 +361,9 @@ exports.createMeeting = async (req, res) => {
 };
 
 /**
- * @desc    Execute a transactional presence check toggle flag for a student record
- * @route   PUT /api/admin/meetings/:meetingId/toggle-attendance
- * @access  Private (Admin Only)
+ * @desc     Execute a transactional presence check toggle flag for a student record
+ * @route    PUT /api/admin/meetings/:meetingId/toggle-attendance
+ * @access   Private (Admin Only)
  */
 exports.toggleAttendance = async (req, res) => {
   try {
@@ -406,7 +391,6 @@ exports.toggleAttendance = async (req, res) => {
 
     await meeting.save();
 
-    // Trigger sequential tracking recalculation
     await recalculateAndCacheStudentMetrics(studentId, meeting.semester);
 
     return res.status(200).json({ 
@@ -430,7 +414,6 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
 
     const targetSemester = currentSemester || 'First Semester';
 
-    // 🛡️ THE DORMANCY GUARD INTERCEPTOR
     if (targetStudent.accountStatus === 'Dormant') {
       await User.findByIdAndUpdate(studentId, {
         $set: { "activityMetrics.standing": 'Dormant (IT Session Sync)' }
@@ -439,13 +422,10 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
       return; 
     }
 
-    // 📈 FIXED PRODUCTION FALLBACK INITIALIZATION GATE
-    // Safely fallback defaults if activityMetrics schema block hasn't been instantiated yet
     const metricsBase = targetStudent.activityMetrics || {};
     const massesCount = metricsBase.massesCount || 0;
     const otherActivitiesCount = metricsBase.otherActivitiesCount || 0;
 
-    // 📈 SEMESTER-SPECIFIC CALCULATION PARTITION
     const totalMeetingsInSem = await Meeting.countDocuments({ semester: targetSemester });
     const attendedMeetingsInSem = await Meeting.countDocuments({ 
       semester: targetSemester,
@@ -454,14 +434,12 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
     
     const meetingPercent = totalMeetingsInSem > 0 ? Math.round((attendedMeetingsInSem / totalMeetingsInSem) * 100) : 0;
 
-    // Dynamic Semester Audit Timeline calculation anchor
     const semesterStartDate = new Date('2026-01-01'); 
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
 
     const massTarget = weeksElapsed * 4; 
     const massPercent = massTarget > 0 ? Math.min(100, Math.round((massesCount / massTarget) * 100)) : 0;
     
-    // Institutional Weighting Matrix: 40% Assemblies + 40% Masses + 20% Supplementaries
     const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
 
     let standing = 'Very Poor';
