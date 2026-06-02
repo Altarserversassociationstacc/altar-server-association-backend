@@ -54,7 +54,7 @@ exports.signup = async (req, res) => {
       accountStatus: 'Active' // Baseline lifecycle instantiation state
     });
 
-    // ✅ FIXED: Points directly to your new GET endpoint string route matching adminRoutes.js
+    // Points directly to your new GET endpoint string route matching adminRoutes.js
     const BACKEND_BASE = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
     const approveLink = `${BACKEND_BASE.replace(/\/$/, '')}/api/admin/approve-student-direct/${user._id}`;
     
@@ -278,7 +278,9 @@ exports.getActivityStats = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findById(id);
-    if (!user) return res.status(404).json({ student record not found.' });
+    
+    // ✅ FIXED: String token layout syntax error properly scrubbed here on line 281
+    if (!user) return res.status(404).json({ message: 'Student record not found.' });
 
     const semesterStartDate = new Date('2026-01-01'); 
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
@@ -382,189 +384,4 @@ exports.resetPassword = async (req, res) => {
 
     return res.status(200).json({ message: 'Password has been successfully reset. You can now log in.' });
   } catch (err) {
-    return res.status(500).json({ message: 'Server error: ' + err.message });
-  }
-};
-
-// @desc     Complete user profile after login with defensive input scrubbing and state interceptors
-// @route    PUT /api/student/complete-profile/:id
-exports.completeProfile = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: 'User not found.' });
-    
-    if (user.accountStatus === 'Suspended') {
-      return res.status(403).json({ message: `Operation rejected. Your profile is under disciplinary suspension: ${user.statusReason}` });
-    }
-    if (user.accountStatus === 'Dormant') {
-      return res.status(403).json({ message: 'Operation rejected. This account is currently dormant for 400L Industrial Training.' });
-    }
-    if (user.accountStatus === 'Locked') {
-      return res.status(403).json({ message: 'Your profile details have been securely finalized and locked for this session.' });
-    }
-
-    const fields = [
-      'fullName', 'profilePicture', 'dateOfBirth', 'phoneNumber', 'regNo',
-      'schoolResidentialAddress', 'department', 'currentLevel', 'levelInducted',
-      'stateOfOrigin', 'homeTown', 'permanentResidence', 'homeDiocese'
-    ];
-
-    fields.forEach(field => {
-      if (req.body[field] !== undefined && req.body[field] !== '') {
-        let value = req.body[field];
-        
-        if (['currentLevel', 'levelInducted'].includes(field) && value) {
-          let valueStr = value.toString().trim().toUpperCase();
-          if (!valueStr.endsWith('L')) {
-            valueStr = `${valueStr}L`;
-          }
-          value = valueStr;
-        }
-
-        user[field] = value;
-      } else if (['currentLevel', 'levelInducted'].includes(field)) {
-        user[field] = user[field] || '100L';
-      }
-    });
-
-    user.isProfileComplete = true;
-    await user.save();
-
-    return res.status(200).json({ message: 'Profile completed successfully!', user });
-  } catch (err) {
-    console.error("❌ [Complete Profile Validation Failure]:", err.message);
-    return res.status(500).json({ message: 'Server validation exception error: ' + err.message });
-  }
-};
-
-// @desc     Comprehensive evaluation endpoint to manage lock state boundaries and promotion conditions
-// @route    GET /api/student/profile-status/:id
-exports.getProfileStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const student = await User.findById(id);
-    if (!student) return res.status(404).json({ success: false, message: "Student context missing." });
-
-    if (student.accountStatus === 'Suspended' || student.accountStatus === 'Dormant') {
-      return res.status(403).json({
-        success: false,
-        statusBlocked: true,
-        accountStatus: student.accountStatus,
-        message: student.statusReason || "Access restricted by administrative panel context configuration."
-      });
-    }
-
-    const semesterStartDate = new Date('2026-01-01');
-    const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-    
-    const currentLevelStr = student.currentLevel || '100L';
-    const meetings = await Meeting.find({ targetLevel: currentLevelStr }).lean();
-
-    const meetingTotal = meetings.length || 1;
-    const meetingCount = meetings.filter(m => m.attendanceList?.map(sid => sid.toString()).includes(id)).length;
-    const meetingPercent = Math.min(100, Math.round((meetingCount / meetingTotal) * 100)) || 0;
-
-    const activityCounts = await Attendance.aggregate([
-      { $match: { user: mongoose.Types.ObjectId.createFromHexString(id) } },
-      { $group: { _id: '$category', count: { $sum: 1 } } }
-    ]);
-
-    let massesCount = 0, otherActivitiesCount = 0;
-    activityCounts.forEach(item => { 
-      if (item._id === 'Mass') massesCount = item.count; 
-      if (item._id === 'Other') otherActivitiesCount = item.count; 
-    });
-    
-    const massTarget = weeksElapsed * 4;
-    const massPercent = Math.min(100, Math.round((massesCount / massTarget) * 100)) || 0;
-
-    const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
-
-    let promptUnlockModal = false;
-    const currentIdx = LEVEL_PROGRESSION.indexOf(currentLevelStr);
-    
-    const isCardActivated = student.membershipCard?.activation === 'Active' || student.membershipCard?.status === 'Paid';
-
-    if (overallPercent >= 70 && currentIdx < LEVEL_PROGRESSION.length - 1) {
-      if (isCardActivated) {
-        const nextLevel = LEVEL_PROGRESSION[currentIdx + 1];
-        student.currentLevel = nextLevel;
-        student.accountStatus = 'Active'; 
-        student.statusReason = `System auto-promoted account session ledger to ${nextLevel}`;
-        await student.save();
-      } else {
-        promptUnlockModal = true;
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      promptUnlockModal,
-      accountStatus: student.accountStatus, 
-      data: student
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Status processing transaction failure: " + err.message });
-  }
-};
-
-// @desc     Lock user profile to prevent further edits
-// @route    PUT /api/student/lock-profile/:id
-exports.lockProfile = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: 'User not found.' });
-
-    if (user.accountStatus === 'Suspended' || user.accountStatus === 'Dormant') {
-      return res.status(403).json({ message: 'Cannot modify lock states while account status is administratively restricted.' });
-    }
-
-    user.accountStatus = 'Locked';
-    user.statusReason = 'Student finalized and locked profile bio-data.';
-    await user.save();
-
-    return res.status(200).json({ message: 'Profile has been securely locked.', user });
-  } catch (err) {
-    return res.status(500).json({ message: 'Server error: ' + err.message });
-  }
-};
-
-// @desc     Delete user account
-// @route    DELETE /api/student/delete-account/:id
-exports.deleteAccount = async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    await Promise.all([
-      Attendance.deleteMany({ user: id }),
-      User.findByIdAndDelete(id)
-    ]);
-
-    return res.status(200).json({ message: 'Account deleted successfully.' });
-  } catch (err) {
-    return res.status(500).json({ message: 'Server error: ' + err.message });
-  }
-};
-
-// @desc     Check user verification/approval status matching frontend loops
-// @route     GET /api/student/check-status/:email
-exports.checkStatus = async (req, res) => {
-  try {
-    const { email } = req.params;
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-
-    return res.status(200).json({
-      success: true,
-      isEmailVerified: user.isEmailVerified,
-      isAdminApproved: user.isVerified 
-    });
-  } catch (err) {
-    return res.status(500).json({ message: 'Server error: ' + err.message });
-  }
-};
+    return res.status(500
