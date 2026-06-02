@@ -68,28 +68,6 @@ const sendStudentEmail = async (user, loginLink, code, magicLink, otpPageLink) =
   }
 };
 
-// ==========================================
-// SHARED VISUAL INTERFACE RESPONSES (HTML)
-// ==========================================
-const renderApprovalScreen = (user) => `
-  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 550px; margin: 60px auto; padding: 40px; border: 1px solid #c3e6cb; border-radius: 16px; background-color: #d4edda; color: #155724; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-    <div style="text-align: center; margin-bottom: 20px;">
-      <span style="font-size: 50px;">🎉</span>
-    </div>
-    <h1 style="margin-top: 0; font-size: 26px; text-align: center; color: #155724;">Administrative Approval Successful</h1>
-    
-    <hr style="border: 0; height: 1px; background: #c3e6cb; margin: 25px 0;" />
-    
-    <div style="font-size: 15px; line-height: 1.6; color: #1c602c;">
-      <p style="margin: 10px 0;"><strong>Candidate Name:</strong> ${user.fullName}</p>
-      <p style="margin: 10px 0;"><strong>Email Address:</strong> ${user.email}</p>
-      <p style="margin: 25px 0 0 0; text-align: center; font-weight: 600; font-size: 14px; background: rgba(255,255,255,0.6); padding: 12px; border-radius: 8px; border: 1px dashed #b1dfbb;">
-        The account state has shifted to active. Automated dispatch systems have successfully cleared verification options to the student.
-      </p>
-    </div>
-  </div>
-`;
-
 const renderErrorScreen = (title, message) => `
   <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border: 1px solid #f5c6cb; border-radius: 12px; background-color: #f8d7da; color: #721c24; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
     <h1 style="margin-top: 0; font-size: 24px;">${title}</h1>
@@ -219,7 +197,9 @@ exports.approve = async (req, res) => {
       isRead: false
     });
 
-    return res.status(200).send(renderApprovalScreen(user));
+    // ✅ FIXED: Actively redirects the browser view straight to the frontend onboarding app route context!
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
   } catch (err) {
     return res.status(500).send(renderErrorScreen('System Error', err.message));
   }
@@ -257,7 +237,9 @@ exports.approveStudent = async (req, res) => {
       isRead: false
     });
 
-    return res.status(200).send(renderApprovalScreen(user));
+    // ✅ FIXED: Actively redirects the browser view straight to the frontend onboarding app route context!
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
   } catch (err) {
     return res.status(500).send(renderErrorScreen('System Error', err.message));
   }
@@ -381,7 +363,7 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
     let standing = 'Very Poor';
     if (overallPercent >= 90) standing = 'Very Good';
     else if (overallPercent >= 70) standing = 'Good';
-    else if (overallPercent >= 50) standing = 'Fair';
+    else if (overallPercent >= 50) standing = 'Poor';
 
     await User.findByIdAndUpdate(studentId, {
       $set: {
