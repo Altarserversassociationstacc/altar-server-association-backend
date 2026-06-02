@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+const { google } = require('googleapis');
 
 // Data Layer Model Injections
 const Admin = require('../models/Admin');
@@ -13,88 +15,107 @@ const Notification = require('../models/Notification');
 const LEVEL_PROGRESSION = ['100L', '200L', '300L', '400L', '500L'];
 
 // ==========================================
+// INTERNAL EMAIL HELPER ENGINE
+// ==========================================
+const sendStudentEmail = async (user, loginLink, code, magicLink, otpPageLink) => {
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GMAIL_CLIENT_ID,
+      process.env.GMAIL_CLIENT_SECRET,
+      "https://developers.google.com/oauthplayground"
+    );
+
+    oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const subject = "Account Approved!";
+    const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
+    
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #f0f0f0; border-radius: 8px;">
+        <h2 style="color: #8b4513; border-bottom: 2px solid #8b4513; padding-bottom: 10px;">Account Approved!</h2>
+        <p>Hello <strong>${user.fullName}</strong>,</p>
+        <p>Your account has been approved by the admin! To complete your registration, please verify your email using the code below:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f4f4f4; padding: 10px 20px; border-radius: 5px; border: 1px dashed #8b4513; color: #8b4513;">${code}</span>
+        </div>
+        <p style="text-align: center;">Choose your verification method:</p>
+        <div style="text-align: center; margin: 20px 0; display: flex; justify-content: center; gap: 10px;">
+          <a href="${magicLink}" style="display: inline-block; padding: 12px 20px; background-color: #8b4513; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin: 5px;">Automatic Login</a>
+          <a href="${otpPageLink}" style="display: inline-block; padding: 12px 20px; background-color: #ffffff; color: #8b4513; text-decoration: none; border-radius: 5px; font-weight: bold; border: 1px solid #8b4513; margin: 5px;">Enter Code Manually</a>
+        </div>
+        <p>If the buttons above do not work, please visit the portal and use the code provided.</p>
+        <p style="font-size: 13px; color: #666;">Once verified, you can access your dashboard here: <a href="${loginLink}" style="color: #8b4513;">${loginLink}</a></p>
+      </div>
+    `;
+
+    const messageParts = [
+      `From: Altar Server Association <${process.env.ASSOCIATION_EMAIL}>`,
+      `To: ${user.email}`,
+      'Content-Type: text/html; charset=utf-8',
+      'MIME-Version: 1.0',
+      `Subject: ${utf8Subject}`,
+      '',
+      htmlContent
+    ];
+
+    const message = messageParts.join('\n');
+    const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    await gmail.users.messages.send({ userId: 'me', requestBody: { raw: encodedMessage } });
+  } catch (error) {
+    console.error("Gmail API Error:", error.message);
+    throw new Error("Email delivery failed, but account state was updated.");
+  }
+};
+
+// ==========================================
 // 1. ADMINISTRATIVE AUTHENTICATION ENGINE
 // ==========================================
 
-/**
- * @desc     Register a new administrative account profile
- * @route    POST /api/admin/signup
- * @access   Private / System Protected
- */
 exports.signup = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
-
     if (!fullName || !email || !password) {
       return res.status(400).json({ success: false, message: 'All operational fields are mandatory.' });
     }
-
     const adminExists = await Admin.findOne({ email: email.toLowerCase().trim() });
     if (adminExists) {
       return res.status(400).json({ success: false, message: 'An administrator account with this email already exists.' });
     }
-
     const admin = await Admin.create({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
       password, 
     });
-
     const adminResponse = admin.toObject();
     delete adminResponse.password;
-
-    return res.status(201).json({ 
-      success: true,
-      message: 'Administrative profile provisioned successfully.', 
-      admin: adminResponse 
-    });
+    return res.status(201).json({ success: true, message: 'Administrative profile provisioned successfully.', admin: adminResponse });
   } catch (err) {
-    console.error('Critical Signup Failure:', err);
-    return res.status(500).json({ success: false, message: 'Internal Server Error during registration initialization: ' + err.message });
+    return res.status(500).json({ success: false, message: 'Internal Server Error: ' + err.message });
   }
 };
 
-/**
- * @desc     Authenticate administrative profile credentials and yield access token
- * @route    POST /api/admin/login
- * @access   Public
- */
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email credentials and password verification strings are required.' });
     }
-
     const admin = await Admin.findOne({ email: email.toLowerCase().trim() }).select('+password');
-    if (!admin) {
-      return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
-    }
-
+    if (!admin) return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
     const isMatch = await admin.matchPassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
-    }
+    if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
 
     const token = jwt.sign(
       { id: admin._id, email: admin.email, role: 'admin' },
       process.env.JWT_SECRET || 'fallback_admin_secret_key',
       { expiresIn: '7d' }
     );
-
     const adminResponse = admin.toObject();
     delete adminResponse.password;
-
-    return res.status(200).json({ 
-      success: true,
-      message: 'Administrative session authenticated successfully.', 
-      token, 
-      admin: adminResponse 
-    });
+    return res.status(200).json({ success: true, message: 'Administrative session authenticated successfully.', token, admin: adminResponse });
   } catch (err) {
-    console.error('Critical Login Failure:', err);
-    return res.status(500).json({ success: false, message: 'Internal Server Error during credential validation: ' + err.message });
+    return res.status(500).json({ success: false, message: 'Internal Server Error: ' + err.message });
   }
 };
 
@@ -102,55 +123,32 @@ exports.login = async (req, res) => {
 // 2. DATA REGISTRY ROSTER WORKBOOKS
 // ==========================================
 
-/**
- * @desc     Find a specific student via dynamic lookup parameter (Registry ID or Object ID)
- * @route    GET /api/admin/find-student/:lookupKey
- * @access   Private (Admin Only)
- */
 exports.findStudentByRegistryId = async (req, res) => {
   try {
     const { lookupKey } = req.params;
     const cleanedKey = decodeURIComponent(lookupKey).trim();
-
     const student = await User.findOne({
       $or: [
         { _id: cleanedKey.match(/^[0-9a-fA-F]{24}$/) ? cleanedKey : null },
         { regNo: { $regex: new RegExp(`^${cleanedKey}$`, 'i') } }
       ]
     }).select('-password').lean();
-
-    if (!student) {
-      return res.status(404).json({ success: false, message: 'No student member matched your query parameters.' });
-    }
-
+    if (!student) return res.status(404).json({ success: false, message: 'No student member matched your query parameters.' });
     return res.status(200).json({ success: true, user: student });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Registry search fault: ' + err.message });
   }
 };
 
-/**
- * @desc     Retrieve the verified list of registered student users
- * @route    GET /api/admin/students
- * @access   Private (Admin Only)
- */
 exports.getAllStudents = async (req, res) => {
   try {
-    const students = await User.find({ 
-      role: { $in: ['student', null] } 
-    }).select('-password').sort({ fullName: 1 }).lean();
-
+    const students = await User.find({ role: { $in: ['student', null] } }).select('-password').sort({ fullName: 1 }).lean();
     return res.status(200).json(students);
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Roster Retrieval Failure: ' + err.message });
   }
 };
 
-/**
- * @desc     Get all created meeting instances sorted by chronological execution date
- * @route    GET /api/admin/meetings-list
- * @access   Private (Admin Only)
- */
 exports.getMeetingsList = async (req, res) => {
   try {
     const meetings = await Meeting.find().sort({ eventDate: -1 }).lean();
@@ -161,185 +159,130 @@ exports.getMeetingsList = async (req, res) => {
 };
 
 /**
- * @desc     Directly approve a student member from an email link or dashboard click
+ * @desc     LEGACY METHOD: Handles older verification token clicks cleanly from email links
+ * @route    GET /api/admin/approve/:token
+ */
+exports.approve = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const user = await User.findOne({ verificationToken: token });
+    if (!user) {
+      return res.status(404).send('<h1>Invalid or Expired Link</h1><p>This approval link is invalid or has already been used.</p>');
+    }
+    if (Date.now() > user.codeExpires) {
+      return res.status(400).send('<h1>Link Expired</h1><p>This approval link has expired.</p>');
+    }
+
+    user.isVerified = true;
+    await user.save();
+
+    const loginLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/login`;
+    const magicLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-magic/${user.verificationToken}`;
+    const otpPageLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-email`;
+
+    await sendStudentEmail(user, loginLink, user.verificationCode, magicLink, otpPageLink);
+
+    await Notification.create({
+      recipient: user._id,
+      title: "Account Officially Approved 🎉",
+      message: "Welcome! Your sanctuary access has been granted by the administration.",
+      isRead: false
+    });
+
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
+  } catch (err) {
+    return res.status(500).send('<h1>Approval failed</h1><p>' + err.message + '</p>');
+  }
+};
+
+/**
+ * @desc     MODERN METHOD: Handles direct object ID validation links from backend dashboards
  * @route    GET /api/admin/approve-student-direct/:id
- * @access   Public / Direct Email Verification
  */
 exports.approveStudent = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ success: false, message: 'Invalid structural student document identifier format.' });
-    }
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ success: false, message: 'Invalid ID format.' });
 
-    const student = await User.findByIdAndUpdate(
-      id, 
-      { $set: { isVerified: true } }, 
-      { new: true }
-    ).select('-password');
-    
-    if (!student) return res.status(404).json({ success: false, message: 'Student not found.' });
+    const student = await User.findByIdAndUpdate(id, { $set: { isVerified: true } }, { new: true }).select('-password');
+    if (!student) return res.status(404).json({ success: false, message: 'Student document not found.' });
 
     await Notification.create({
       recipient: student._id,
       title: "Account Officially Approved 🎉",
-      message: "Welcome! Your sanctuary access has been granted by the administration. Explore your dashboard settings.",
+      message: "Welcome! Your sanctuary access has been granted by the administration.",
       isRead: false
     });
 
-    // ✅ FIXED: Smooth browser redirect wrapper so admins don't look at flat raw JSON text layouts!
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(student.email)}&approved=true`);
-
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Approval Failed: ' + err.message });
   }
 };
 
-/**
- * @desc     Modify student operational lifecycle status (Lock, Unlock, Dormant)
- * @route    PUT /api/admin/update-student-status/:studentId
- * @access   Private (Admin Only)
- */
 exports.updateStudentStatus = async (req, res) => {
   try {
     const { studentId } = req.params;
     const { accountStatus, reason, updateLevel } = req.body;
-
-    if (!studentId || !studentId.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ success: false, message: 'Invalid structural target validation parameters.' });
-    }
-
-    const validStatuses = ['Active', 'Locked', 'Dormant', 'Suspended'];
-    if (!validStatuses.includes(accountStatus)) {
-      return res.status(400).json({ success: false, message: `Invalid status setup. Must be one of: ${validStatuses.join(', ')}` });
-    }
+    if (!studentId || !studentId.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ success: false, message: 'Invalid targeted tracking parameter.' });
 
     const student = await User.findById(studentId);
-    if (!student) return res.status(404).json({ success: false, message: "Student profile context not found within current records registry." });
-
-    if (accountStatus === 'Dormant' && student.currentLevel !== '400L') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Dormancy state overrides are strictly reserved for 400L Computer Science students undergoing active industrial training placements." 
-      });
-    }
+    if (!student) return res.status(404).json({ success: false, message: "Student profile context not found." });
 
     student.accountStatus = accountStatus;
-    student.statusReason = reason || `Administrative status transition configured to ${accountStatus}`;
+    student.statusReason = reason || `Transitioned parameters to ${accountStatus}`;
 
     if (updateLevel) {
       let levelStr = updateLevel.toString().trim().toUpperCase();
       if (!levelStr.endsWith('L')) levelStr = `${levelStr}L`;
-      if (LEVEL_PROGRESSION.includes(levelStr)) {
-        student.currentLevel = levelStr;
-      }
+      if (LEVEL_PROGRESSION.includes(levelStr)) student.currentLevel = levelStr;
     }
-
     await student.save();
-
-    const currentSemester = student.activityMetrics?.lastEvaluatedSemester || 'First Semester';
-    await recalculateAndCacheStudentMetrics(student._id, currentSemester);
-
-    const updatedStudent = await User.findById(studentId).select('-password').lean();
-
-    return res.status(200).json({
-      success: true,
-      message: `Account status successfully transformed to ${accountStatus}.`,
-      student: updatedStudent
-    });
+    return res.status(200).json({ success: true, message: 'Status transformed successfully.', student });
   } catch (err) {
-    console.error("❌ Account status modification operation exception:", err);
-    return res.status(500).json({ success: false, message: "Admin status override operation dropped: " + err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/**
- * @desc     Permanently remove a student record along with cascading relational objects
- * @route    DELETE /api/admin/students/:id
- * @access   Private (Admin Only)
- */
 exports.deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ success: false, message: 'Invalid hexadecimal student record identification parameters.' });
-    }
-
-    const student = await User.findByIdAndDelete(id);
-    if (!student) {
-      return res.status(404).json({ success: false, message: "Member record context could not be resolved or found." });
-    }
-
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ success: false, message: 'Invalid identification data parameter.' });
+    await User.findByIdAndDelete(id);
     await Notification.deleteMany({ recipient: id });
-
-    return res.status(200).json({ 
-      success: true, 
-      message: `The registration document for ${student.fullName} has been permanently purged.` 
-    });
+    return res.status(200).json({ success: true, message: 'Registration document purged.' });
   } catch (err) {
-    console.error("❌ Critical Student Purge Record Execution Exception:", err.message);
-    return res.status(500).json({ success: false, message: "Deletion execution matrix failure: " + err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/**
- * @desc     Retrieve real-time figures for dashboard analytical cards
- * @route    GET /api/admin/dashboard-stats
- * @access   Private (Admin Only)
- */
 exports.getDashboardStats = async (req, res) => {
   try {
-    const [
-      totalMembers,
-      activeBroadcasts,
-      upcomingEvents,
-      notifications,
-      pendingApprovals
-    ] = await Promise.all([
+    const [totalMembers, activeBroadcasts, upcomingEvents, pendingApprovals] = await Promise.all([
       User.countDocuments({ role: { $in: ['student', null] } }),
       Announcement.countDocuments(),
       Event.countDocuments({ eventDate: { $gte: new Date() } }),
-      Notification.countDocuments(),
       User.countDocuments({ isVerified: false, role: { $in: ['student', null] } })
     ]);
-
-    return res.status(200).json({
-      totalMembers,
-      activeBroadcasts,
-      upcomingEvents,
-      notifications,
-      pendingApprovals
-    });
+    return res.status(200).json({ totalMembers, activeBroadcasts, upcomingEvents, pendingApprovals });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Metric Aggregation Failure: ' + err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // ==========================================
-// 3. ASSEMBLY LIFECYCLE & RATING TRANSACTION LOGIC
+// 3. ASSEMBLY LIFECYCLE LOGIC
 // ==========================================
 
-/**
- * @desc     Instantiate a new general assembly attendance ledger session
- * @route    POST /api/admin/meetings
- * @access   Private (Admin Only)
- */
 exports.createMeeting = async (req, res) => {
   try {
     const { title, dateString, date, day, semester } = req.body;
     const absoluteDateString = dateString || date;
-
-    if (!title || !absoluteDateString) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Missing vital fields. Title and Date String are mandatory.' 
-      });
-    }
+    if (!title || !absoluteDateString) return res.status(400).json({ success: false, message: 'Title and Date are required.' });
 
     const parsedDate = new Date(absoluteDateString);
-
     const newMeeting = await Meeting.create({
       title: title.trim(),
       day: day || 'Saturday',
@@ -348,38 +291,20 @@ exports.createMeeting = async (req, res) => {
       eventDate: isNaN(parsedDate.getTime()) ? Date.now() : parsedDate,
       attendanceList: []
     });
-
-    return res.status(201).json({ 
-      success: true,
-      message: 'Meeting session initialized successfully.', 
-      meeting: newMeeting 
-    });
+    return res.status(201).json({ success: true, meeting: newMeeting });
   } catch (err) {
-    console.error("❌ Mongoose Insertion Crash Log:", err.message);
-    return res.status(500).json({ success: false, message: 'Database Write Error: ' + err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/**
- * @desc     Execute a transactional presence check toggle flag for a student record
- * @route    PUT /api/admin/meetings/:meetingId/toggle-attendance
- * @access   Private (Admin Only)
- */
 exports.toggleAttendance = async (req, res) => {
   try {
     const { meetingId } = req.params;
     const { studentId } = req.body;
-
-    if (!studentId || !studentId.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ success: false, message: 'Target Student ID configuration must be specified validly.' });
-    }
-
     const meeting = await Meeting.findById(meetingId);
-    if (!meeting) {
-      return res.status(404).json({ success: false, message: 'Target meeting documentation context could not be located.' });
-    }
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting documentation not found.' });
 
-    const studentIndex = meeting.attendanceList.indexOf(studentId);
+    const studentIndex = meeting.attendanceList.findIndex(id => id.toString() === studentId);
     let operationStatus = 'present';
 
     if (studentIndex > -1) {
@@ -388,64 +313,34 @@ exports.toggleAttendance = async (req, res) => {
     } else {
       meeting.attendanceList.push(studentId);
     }
-
     await meeting.save();
-
     await recalculateAndCacheStudentMetrics(studentId, meeting.semester);
-
-    return res.status(200).json({ 
-      success: true,
-      message: `Student tracking status altered to: ${operationStatus}.`, 
-      meeting 
-    });
+    return res.status(200).json({ success: true, message: `Tracking set to ${operationStatus}`, meeting });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Attendance Toggle Transaction Failed: ' + err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/**
- * @abstract Background Metrics Recalculation Engine
- * @description Re-computes absolute compliance metrics isolated cleanly within semester boundaries.
- */
 async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
   try {
     const targetStudent = await User.findById(studentId);
-    if (!targetStudent) return;
+    if (!targetStudent || targetStudent.accountStatus === 'Dormant') return;
 
     const targetSemester = currentSemester || 'First Semester';
-
-    if (targetStudent.accountStatus === 'Dormant') {
-      await User.findByIdAndUpdate(studentId, {
-        $set: { "activityMetrics.standing": 'Dormant (IT Session Sync)' }
-      });
-      console.log(`🛡️ [IT Dormancy Guard]: Frozen metrics for ${targetStudent.fullName}`);
-      return; 
-    }
-
-    const metricsBase = targetStudent.activityMetrics || {};
-    const massesCount = metricsBase.massesCount || 0;
-    const otherActivitiesCount = metricsBase.otherActivitiesCount || 0;
-
-    const totalMeetingsInSem = await Meeting.countDocuments({ semester: targetSemester });
-    const attendedMeetingsInSem = await Meeting.countDocuments({ 
-      semester: targetSemester,
-      attendanceList: studentId 
-    });
-    
+    const totalMeetingsInSem = await Meeting.countDocuments({ targetLevel: targetStudent.currentLevel || '100L', semester: targetSemester });
+    const attendedMeetingsInSem = await Meeting.countDocuments({ targetLevel: targetStudent.currentLevel || '100L', semester: targetSemester, attendanceList: studentId });
     const meetingPercent = totalMeetingsInSem > 0 ? Math.round((attendedMeetingsInSem / totalMeetingsInSem) * 100) : 0;
 
-    const semesterStartDate = new Date('2026-01-01'); 
+    const semesterStartDate = new Date('2026-01-01');
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+    const massTarget = weeksElapsed * 4;
+    const massPercent = massTarget > 0 ? Math.min(100, Math.round(((targetStudent.activityMetrics?.massesCount || 0) / massTarget) * 100)) : 0;
 
-    const massTarget = weeksElapsed * 4; 
-    const massPercent = massTarget > 0 ? Math.min(100, Math.round((massesCount / massTarget) * 100)) : 0;
-    
-    const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
-
+    const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, (targetStudent.activityMetrics?.otherActivitiesCount || 0) * 10) * 0.2));
     let standing = 'Very Poor';
     if (overallPercent >= 90) standing = 'Very Good';
     else if (overallPercent >= 70) standing = 'Good';
-    else if (overallPercent >= 50) standing = 'Fair';
+    else if (overallPercent >= 50) standing = 'Poor';
 
     await User.findByIdAndUpdate(studentId, {
       $set: {
@@ -459,6 +354,6 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
       }
     });
   } catch (err) {
-    console.error("❌ Recalculation Core Engine Fault Intercepted:", err.message);
+    console.error(err);
   }
 }
