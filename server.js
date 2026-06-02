@@ -28,8 +28,9 @@ app.use(cors({
   origin: [
     'http://localhost:3000', 
     'http://localhost:5173', 
-    'http://localhost:5174', // 🚀 Unlocks current active Vite browser port matrix
-    process.env.FRONTEND_URL  
+    'http://localhost:5174', 
+    process.env.FRONTEND_URL, // Whitelists your frontend URL variable
+    process.env.CLIENT_URL    // ✅ FIXED: Safely whitelists CLIENT_URL too so CORS never blocks you!
   ].filter(Boolean),          // Cleans out any undefined environment values safely
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'user-id'],
@@ -78,15 +79,13 @@ const startServer = async () => {
     res.status(err.status || 500).json({ success: false, message: err.message || 'Internal Server Error' });
   });
 
-
-// The '0.0.0.0' is essential for Render to see your server
-app.listen(PORT, '0.0.0.0', () => {
+  // The '0.0.0.0' is essential for Render to see your server
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running live on port ${PORT}`);
-});
+  });
 };
 
 // 🛡️ CRITICAL FAULT TOLERANCE MATRIX LAYER
-// Intercepts any unexpected external library crashes or DNS timeout drops safely
 process.on('unhandledRejection', (reason, promise) => {
   console.error('\x1b[33m[Anti-Crash Guard] Unhandled Rejection intercepted:\x1b[0m', reason);
 });
