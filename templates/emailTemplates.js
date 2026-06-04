@@ -16,17 +16,27 @@ const baseLayout = (content) => `
   </div>
 `;
 
-const getAdminSignupTemplate = (user, approveLink) => baseLayout(`
-  <h3 style="color: #d9534f; margin-top: 0;">New Registration Pending Review</h3>
+/**
+ * @desc     Generates the notification email payload sent to the admin inbox.
+ * Includes explicit user fields (Name, Email, Phone) and routes to the verification interface.
+ */
+const getAdminSignupTemplate = (user, reviewLink) => baseLayout(`
+  <h3 style="color: #8b4513; margin-top: 0; font-size: 20px;">New Application Received</h3>
   <p>Dear Administrator,</p>
-  <p>A new member has completed the online signup form and requires administrative verification before system entry permissions are authorized:</p>
-  <div style="background-color: #f8f9fa; padding: 15px; border-left: 4px solid #8b4513; border-radius: 4px; margin: 20px 0;">
-    <p style="margin: 6px 0;"><strong>Full Name:</strong> ${user.fullName}</p>
-    <p style="margin: 6px 0;"><strong>Email Account:</strong> ${user.email}</p>
+  <p>A new applicant has submitted a profile form for the Altar Server Association portal framework and requires verification:</p>
+  
+  <div style="background-color: #fdfbf7; border: 1px solid #f5e6d3; padding: 18px; border-left: 5px solid #8b4513; border-radius: 6px; margin: 20px 0; font-size: 15px;">
+    <p style="margin: 8px 0; color: #555;"><strong>Full Name:</strong> <span style="color: #222; font-weight: 600;">${user.fullName}</span></p>
+    <p style="margin: 8px 0; color: #555;"><strong>Email Account:</strong> <span style="color: #222;">${user.email}</span></p>
+    <p style="margin: 8px 0; color: #555;"><strong>Phone Number:</strong> <span style="color: #222; font-weight: bold;">${user.phoneNumber || 'Not Provided During Signup'}</span></p>
   </div>
-  <p>Review the application credentials and execute processing below:</p>
+  
+  <p>Click the secure review button below to view this applicant's profile credentials and process their system status controls:</p>
+  
   <div style="text-align: center; margin: 35px 0;">
-    <a href="${approveLink}" style="display: inline-block; padding: 13px 28px; background-color: #28a745; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">Approve Account Access Now</a>
+    <a href="${reviewLink}" style="display: inline-block; padding: 14px 32px; background-color: #8b4513; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(139,69,19,0.15);">
+      Review Registration Request
+    </a>
   </div>
 `);
 

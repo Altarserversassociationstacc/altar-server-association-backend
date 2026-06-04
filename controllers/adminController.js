@@ -197,7 +197,6 @@ exports.approve = async (req, res) => {
       isRead: false
     });
 
-    // ✅ FIXED: Actively redirects the browser view straight to the frontend onboarding app route context!
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
   } catch (err) {
@@ -206,10 +205,94 @@ exports.approve = async (req, res) => {
 };
 
 /**
- * @desc     MODERN METHOD: Handles direct object ID validation links from backend dashboards
+ * @desc     MODERN METHOD: Renders an explicit confirmation dashboard card to the admin.
  * @route    GET /api/admin/approve-student-direct/:id
  */
 exports.approveStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).send(renderErrorScreen('Invalid Parameter', 'The student identification structure format is invalid.'));
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).send(renderErrorScreen('Not Found', 'The requested student registration entry cannot be resolved.'));
+    }
+
+    if (user.isVerified) {
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+      return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
+    }
+
+    return res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Identity Authorization Interface</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        <style>
+          body { background-color: #041004; color: #f3f4f6; font-family: system-ui, -apple-system, sans-serif; }
+        </style>
+      </head>
+      <body class="min-h-screen flex items-center justify-center p-4 antialiased">
+        <div class="w-full max-w-md bg-white text-gray-900 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+          
+          <div class="bg-[#8b4513] px-6 py-5 text-center text-white">
+            <h2 class="text-lg font-bold tracking-wider uppercase text-amber-400">Security Clearance Gateway</h2>
+            <p class="text-xs text-amber-100/90 mt-1">Altar Servers Association Portal Management</p>
+          </div>
+
+          <div class="p-6 space-y-6">
+            <p class="text-sm text-gray-600 text-center leading-relaxed">
+              Verify the biological registration metadata details before validating system activation rights for this user.
+            </p>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-4">
+              <div>
+                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest block">Full Account Profile Name</label>
+                <p class="text-lg font-extrabold text-gray-800 mt-0.5">${user.fullName}</p>
+              </div>
+              
+              <div class="border-t border-gray-200 pt-3">
+                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest block">Primary Electronic Mail</label>
+                <p class="text-base font-semibold text-gray-700 mt-0.5 break-all">${user.email}</p>
+              </div>
+
+              <div class="border-t border-gray-200 pt-3">
+                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest block">Mobile Access Contact</label>
+                <p class="text-base font-bold text-emerald-800 mt-0.5">${user.phoneNumber || 'Not provided on signup'}</p>
+              </div>
+            </div>
+
+            <form action="/api/admin/finalize-approval-execution/${user._id}" method="POST" class="pt-2">
+              <button type="submit" class="w-full bg-[#059669] hover:bg-[#047857] text-white font-bold py-4 px-4 rounded-xl shadow-md transition-all duration-150 transform active:scale-[0.99] cursor-pointer text-center text-base tracking-wide">
+                Confirm & Authorize Member Access
+              </button>
+            </form>
+
+            <div class="text-center">
+              <p class="text-[11px] text-gray-400 font-medium uppercase tracking-wide">
+                System Administrator Node Control &copy; 2026
+              </p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    return res.status(500).send(renderErrorScreen('System Error', err.message));
+  }
+};
+
+/**
+ * @desc     EXECUTION ROUTE: Processes data updates following structural admin validation card clicks
+ * @route    POST /api/admin/finalize-approval-execution/:id
+ */
+exports.finalizeApprovalExecution = async (req, res) => {
   try {
     const { id } = req.params;
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -237,11 +320,10 @@ exports.approveStudent = async (req, res) => {
       isRead: false
     });
 
-    // ✅ FIXED: Actively redirects the browser view straight to the frontend onboarding app route context!
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     return res.redirect(`${clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&approved=true`);
   } catch (err) {
-    return res.status(500).send(renderErrorScreen('System Error', err.message));
+    return res.status(500).send(renderErrorScreen('Execution Error', err.message));
   }
 };
 
@@ -310,7 +392,7 @@ exports.createMeeting = async (req, res) => {
       title: title.trim(),
       day: day || 'Saturday',
       dateString: absoluteDateString.trim(),
-      semester: semester || 'First Semester',
+      semester: semester || 'Harmattan 2026',
       eventDate: isNaN(parsedDate.getTime()) ? Date.now() : parsedDate,
       attendanceList: []
     });
@@ -337,6 +419,8 @@ exports.toggleAttendance = async (req, res) => {
       meeting.attendanceList.push(studentId);
     }
     await meeting.save();
+    
+    // Trigger numeric computation recalculation block
     await recalculateAndCacheStudentMetrics(studentId, meeting.semester);
     return res.status(200).json({ success: true, message: `Tracking set to ${operationStatus}`, meeting });
   } catch (err) {
@@ -344,39 +428,39 @@ exports.toggleAttendance = async (req, res) => {
   }
 };
 
+/**
+ * @desc     PROFESSIONAL SEMESTER ABSOLUTE COUNTER ENGINE
+ * Completely stripped of qualitative statuses and percentage logic layout.
+ * Tracks absolute numerical counts for meetings and masses served.
+ */
 async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
   try {
     const targetStudent = await User.findById(studentId);
     if (!targetStudent || targetStudent.accountStatus === 'Dormant') return;
 
-    const targetSemester = currentSemester || 'First Semester';
-    const totalMeetingsInSem = await Meeting.countDocuments({ targetLevel: targetStudent.currentLevel || '100L', semester: targetSemester });
-    const attendedMeetingsInSem = await Meeting.countDocuments({ targetLevel: targetStudent.currentLevel || '100L', semester: targetSemester, attendanceList: studentId });
-    const meetingPercent = totalMeetingsInSem > 0 ? Math.round((attendedMeetingsInSem / totalMeetingsInSem) * 100) : 0;
+    // Use current active semester tracking string
+    const targetSemester = currentSemester || 'Harmattan 2026';
 
-    const semesterStartDate = new Date('2026-01-01');
-    const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-    const massTarget = weeksElapsed * 4;
-    const massPercent = massTarget > 0 ? Math.min(100, Math.round(((targetStudent.activityMetrics?.massesCount || 0) / massTarget) * 100)) : 0;
+    // 1. Calculate absolute meeting attendance count
+    const attendedMeetingsInSem = await Meeting.countDocuments({ 
+      semester: targetSemester, 
+      attendanceList: studentId 
+    });
 
-    const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, (targetStudent.activityMetrics?.otherActivitiesCount || 0) * 10) * 0.2));
-    let standing = 'Very Poor';
-    if (overallPercent >= 90) standing = 'Very Good';
-    else if (overallPercent >= 70) standing = 'Good';
-    else if (overallPercent >= 50) standing = 'Poor';
+    // 2. Fetch or initialize existing counts safely
+    const currentMassesCount = targetStudent.activityMetrics?.massesCount || 0;
+    const currentOtherActivitiesCount = targetStudent.activityMetrics?.otherActivitiesCount || 0;
 
+    // 3. Update data layers using pure numbers
     await User.findByIdAndUpdate(studentId, {
       $set: {
         "activityMetrics.meetingCount": attendedMeetingsInSem,
-        "activityMetrics.meetingTotal": totalMeetingsInSem,
-        "activityMetrics.meetingPercent": meetingPercent,
-        "activityMetrics.overallPercent": overallPercent,
-        "activityMetrics.standing": standing,
-        "activityMetrics.weeksElapsed": weeksElapsed,
+        "activityMetrics.massesCount": currentMassesCount,
+        "activityMetrics.otherActivitiesCount": currentOtherActivitiesCount,
         "activityMetrics.lastEvaluatedSemester": targetSemester
       }
     });
   } catch (err) {
-    console.error(err);
+    console.error("[Metric Recalculation Error]:", err.message);
   }
 }
