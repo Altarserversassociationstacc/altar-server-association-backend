@@ -1,8 +1,8 @@
 const Meeting = require('../models/Meeting');
 const User = require('../models/Student');
 
-// @desc     Admin: Create a new meeting instance with full calendar metadata
-// @route    POST /api/admin/meetings
+// @desc    Admin: Create a new meeting instance with full calendar metadata
+// @route   POST /api/admin/meetings
 exports.createMeeting = async (req, res) => {
   try {
     const { title, dateString, day, semester } = req.body;
@@ -10,11 +10,16 @@ exports.createMeeting = async (req, res) => {
     // Convert the human-readable string to a valid Date object for system sorting
     const parsedDate = new Date(dateString);
 
+    // 🛡️ Ensure safe fallback for semester if front-end sends wrong data
+    const validSemester = ['Harmattan Semester', 'Rain Semester'].includes(semester) 
+      ? semester 
+      : 'Harmattan Semester';
+
     const newMeeting = await Meeting.create({
       title,
       day,
       dateString,
-      semester,
+      semester: validSemester,
       eventDate: isNaN(parsedDate.getTime()) ? Date.now() : parsedDate
     });
 
@@ -28,8 +33,8 @@ exports.createMeeting = async (req, res) => {
   }
 };
 
-// @desc     Admin: Toggle attendance status for a student (Present <-> Absent)
-// @route    PUT /api/admin/meetings/:meetingId/toggle-attendance
+// @desc    Admin: Toggle attendance status for a student (Present <-> Absent)
+// @route   PUT /api/admin/meetings/:meetingId/toggle-attendance
 exports.toggleAttendance = async (req, res) => {
   try {
     const { meetingId } = req.params;
@@ -65,7 +70,7 @@ exports.toggleAttendance = async (req, res) => {
 
 /**
  * @function calculateAndSyncStudentMetrics
- * @description Sophisticated analytics engine that calculates standings based on semester partitions.
+ * @description Sophisticated analytics engine that calculates standings based on semester and level partitions.
  */
 async function calculateAndSyncStudentMetrics(studentId, currentSemester) {
   const student = await User.findById(studentId);
@@ -78,6 +83,9 @@ async function calculateAndSyncStudentMetrics(studentId, currentSemester) {
     });
     return;
   }
+
+  // 🚀 GRAB THE LEVEL: Check the student's current level so we track it correctly
+  const currentLevel = student.currentLevel || '100L';
 
   // 📈 SEMESTER-SPECIFIC CALCULATION
   // We only count meetings belonging to the specific semester passed from the toggle action
@@ -105,6 +113,7 @@ async function calculateAndSyncStudentMetrics(studentId, currentSemester) {
   else if (overallPercent >= 70) standing = 'Good';
   else if (overallPercent >= 50) standing = 'Fair';
 
+  // 🔄 UPDATE THE DATABASE
   await User.findByIdAndUpdate(studentId, {
     $set: {
       "activityMetrics.meetingCount": attendedMeetingsInSem,
@@ -112,7 +121,8 @@ async function calculateAndSyncStudentMetrics(studentId, currentSemester) {
       "activityMetrics.meetingPercent": meetingPercent,
       "activityMetrics.overallPercent": overallPercent,
       "activityMetrics.standing": standing,
-      "activityMetrics.lastEvaluatedSemester": currentSemester // For audit tracking
+      "activityMetrics.lastEvaluatedSemester": currentSemester, // Harmattan or Rain
+      "activityMetrics.lastEvaluatedLevel": currentLevel // Records whether they were 100L, 200L, etc.
     }
   });
 }

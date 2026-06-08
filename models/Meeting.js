@@ -31,8 +31,9 @@ const MeetingSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Semester allocation is required for performance audits.'],
     enum: {
-      values: ['First Semester', 'Second Semester'],
-      message: '{VALUE} is not a valid academic semester.'
+      // 🚀 UPDATED: Now uses Harmattan and Rain semesters
+      values: ['Harmattan Semester', 'Rain Semester'],
+      message: '{VALUE} is not a valid academic semester. Please use "Harmattan Semester" or "Rain Semester".'
     }
   },
   academicYear: {

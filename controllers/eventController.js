@@ -66,8 +66,9 @@ exports.updateEvent = async (req, res) => {
       delete updateData.image;
     }
 
+    // ✅ NEW CODE
     const updatedEvent = await Event.findByIdAndUpdate(id, updateData, { 
-      new: true,
+      returnDocument: 'after',
       runValidators: true 
     });
     

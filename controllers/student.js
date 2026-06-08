@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -7,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/Student');
 const Meeting = require('../models/Meeting');
 const Attendance = require('../models/Attendance');
+const Assignment = require('../models/Assignment'); // Dynamic metric counter engine import
 
 // Professional Modular Imports
 const { sendOAuth2Email } = require('../services/emailService');
@@ -252,7 +254,7 @@ exports.sendCorrespondence = async (req, res) => {
 // @route     POST /api/student/community-request/:id
 exports.requestCommunityAccess = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; 
     const user = await User.findById(id);
 
     if (!user) return res.status(404).json({ message: 'User not found.' });
@@ -280,36 +282,115 @@ exports.getActivityStats = async (req, res) => {
     const semesterStartDate = new Date('2026-01-01'); 
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
 
+    // const currentLevelStr = user.currentLevel || '100L';
+    // const meetings = await Meeting.find({ targetLevel: currentLevelStr }).sort({ date: -1 }).lean();
+    //  NEW UPDATED CODE
+
     const currentLevelStr = user.currentLevel || '100L';
-    const meetings = await Meeting.find({ targetLevel: currentLevelStr }).sort({ date: -1 }).lean();
-    
+
+    // Fetching all meetings without the strict targetLevel restriction to open the pipeline
+    const meetings = await Meeting.find({}).sort({ date: -1 }).lean(); 
+
+   
+    // 🛡️ CRASH PREVENTION 1: Safe attendance parsing
     const meetingTotal = meetings.length || 1;
     const meetingCount = meetings.filter(m => 
-      m.attendanceList?.some(studentId => studentId.toString() === id)
+      m.attendanceList && m.attendanceList.some(studentId => studentId && studentId.toString() === id)
     ).length;
 
     const meetingPercent = Math.min(100, Math.round((meetingCount / meetingTotal) * 100)) || 0;
 
+  // ... inside getActivityStats ...
+
     const meetingLogs = meetings.map(m => ({
       title: m.title,
-      date: m.date,
-      attended: m.attendanceList?.some(studentId => studentId.toString() === id)
+      // 🛡️ FIX 1: Grab the correct 'eventDate' from the database
+      date: m.eventDate || m.dateString || m.createdAt, 
+      // 🛡️ FIX 2: Send the semester and level so the calendar's filter dropdowns work
+      semester: m.semester || 'Harmattan Semester',
+      level: currentLevelStr,
+      // 🛡️ FIX 3: Tell the calendar exactly what icon to show
+      type: 'Meeting',
+      attended: m.attendanceList && m.attendanceList.some(studentId => studentId && studentId.toString() === id)
     }));
 
-    const activityCounts = await Attendance.aggregate([
-      { $match: { user: new mongoose.Types.ObjectId(id) } },
-      { $group: { _id: '$category', count: { $sum: 1 } } }
-    ]);
+    // ... rest of the code ...
+    const otherActivitiesCount = await Attendance.countDocuments({ user: id, category: 'Other' });
 
-    let massesCount = 0, otherActivitiesCount = 0;
+    // =========================================================================
+    // ⚙️ THE BULLETPROOF AGGREGATION ENGINE
+    // =========================================================================
+    const studentNameClean = user.fullName.trim();
+    const escapedName = studentNameClean.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const searchRegex = new RegExp(escapedName, 'i');
 
-    activityCounts.forEach(item => {
-      if (item._id === 'Mass') massesCount = item.count;
-      if (item._id === 'Other') otherActivitiesCount = item.count;
+    const rolesList = [
+      'sacristan', 'masterOfCeremonies', 'firstAcolyte', 'secondAcolyte',
+      'crossBearer', 'thurifer', 'boatBearer', 'firstAuxiliary',
+      'secondAuxiliary', 'mitreBearer', 'crosierBearer'
+    ];
+
+    const searchConditions = [];
+    rolesList.forEach(role => {
+        searchConditions.push({ [`roles.${role}.name`]: searchRegex }); 
+        searchConditions.push({ [role]: searchRegex }); 
     });
-    
+
+    const relevantAssignments = await Assignment.find({ $or: searchConditions }).sort({ assignmentDate: -1 }).lean();
+
+    const massesAllocatedDates = [];
+    const massesServedDates = [];
+
+    relevantAssignments.forEach((assignment) => {
+      const matchedRoleField = rolesList.find(role => {
+          // 🛡️ CRASH PREVENTION 2: Optional Chaining (?.) protects against missing/null roles
+          const newName = assignment?.roles?.[role]?.name;
+          const oldName = assignment?.[role];
+          const nameToTest = newName || oldName;
+
+          return nameToTest && String(nameToTest).toLowerCase().includes(studentNameClean.toLowerCase());
+      });
+
+      if (matchedRoleField) {
+        const mapKey = matchedRoleField.charAt(0).toUpperCase() + matchedRoleField.slice(1);
+        
+        // 🛡️ CRASH PREVENTION 3: Safe Level Access
+        const roleLevel = assignment?.roles?.[matchedRoleField]?.level || 'Unknown';
+        const roleSemester = assignment?.semester || 'Unknown';
+
+        massesAllocatedDates.push({
+          assignmentId: assignment._id,
+          date: assignment.assignmentDate || assignment.date, 
+          title: assignment.massTitle || assignment.title || "Scheduled Mass Service",
+          role: mapKey,
+          level: roleLevel,
+          semester: roleSemester
+        });
+
+        if (assignment.attendance) {
+          // 🛡️ CRASH PREVENTION 4: Safe Attendance Access
+          const statusValue = assignment?.attendance?.[matchedRoleField] || assignment?.attendance?.[mapKey];
+          if (statusValue === 'Served') {
+            massesServedDates.push({
+              assignmentId: assignment._id,
+              date: assignment.assignmentDate || assignment.date,
+              title: assignment.massTitle || assignment.title || "Served Mass Service",
+              role: mapKey,
+              level: roleLevel,
+              semester: roleSemester
+            });
+          }
+        }
+      }
+    });
+
+    let massesAllocatedCount = massesAllocatedDates.length;
+    let massesServedCount = massesServedDates.length;
+
+    // =========================================================================
+
     const massTarget = weeksElapsed * 4; 
-    const massPercent = Math.min(100, Math.round((massesCount / massTarget) * 100)) || 0;
+    const massPercent = Math.min(100, Math.round((massesServedCount / massTarget) * 100)) || 0;
 
     const overallPercent = Math.round((meetingPercent * 0.4) + (massPercent * 0.4) + (Math.min(100, otherActivitiesCount * 10) * 0.2));
 
@@ -319,16 +400,25 @@ exports.getActivityStats = async (req, res) => {
     else if (overallPercent >= 50) standing = 'Poor';
 
     return res.status(200).json({
-      user, meetingCount, meetingTotal, meetingPercent,
-      otherActivitiesCount, massesCount, weeksElapsed,
-      overallPercent, standing,
+      user, 
+      meetingCount, 
+      meetingTotal, 
+      meetingPercent,
+      otherActivitiesCount, 
+      massesCount: massesServedCount,      
+      massGivenCount: massesAllocatedCount, 
+      massesAllocatedDates, 
+      massesServedDates,    
+      weeksElapsed,
+      overallPercent, 
+      standing,
       meetingLogs
     });
   } catch (err) {
-    return res.status(500).json({ message: 'Server error: ' + err.message });
+    console.error("\n❌ CRITICAL CRASH IN ACTIVITY STATS:", err.message);
+    return res.status(500).json({ message: 'Server crash: ' + err.message });
   }
 };
-
 // ==========================================
 // 3. SECURE PROFILE MANAGEMENT MODULE
 // ==========================================
@@ -487,5 +577,17 @@ exports.checkStatus = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ message: 'Server error: ' + err.message });
+  }
+};
+// ✅ Correct version
+exports.getLiturgicalToday = async (req, res) => {
+  try {
+    const response = await axios.get('http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today');
+    return res.status(200).json(response.data);
+  } catch (err) {
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to proxy liturgical data: ' + err.message 
+    });
   }
 };

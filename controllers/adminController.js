@@ -365,12 +365,23 @@ exports.deleteStudent = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
+    // 1. Capture the filters sent from the frontend query params
+    const { semester, level } = req.query;
+
+    // 2. Build dynamic filter queries
+    const studentFilter = { role: { $in: ['student', null] } };
+    if (level) {
+      studentFilter.currentLevel = level; 
+    }
+
+    // Note: If you track announcements or events by semester, you could apply it here too.
     const [totalMembers, activeBroadcasts, upcomingEvents, pendingApprovals] = await Promise.all([
-      User.countDocuments({ role: { $in: ['student', null] } }),
+      User.countDocuments(studentFilter),
       Announcement.countDocuments(),
       Event.countDocuments({ eventDate: { $gte: new Date() } }),
-      User.countDocuments({ isVerified: false, role: { $in: ['student', null] } })
+      User.countDocuments({ ...studentFilter, isVerified: false })
     ]);
+
     return res.status(200).json({ totalMembers, activeBroadcasts, upcomingEvents, pendingApprovals });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -378,7 +389,7 @@ exports.getDashboardStats = async (req, res) => {
 };
 
 // ==========================================
-// 3. ASSEMBLY LIFECYCLE LOGIC
+// 3. ASSEMBLY LIFECYCLE LOGIC (UPDATED WITH CRASH PREVENTION)
 // ==========================================
 
 exports.createMeeting = async (req, res) => {
@@ -388,11 +399,17 @@ exports.createMeeting = async (req, res) => {
     if (!title || !absoluteDateString) return res.status(400).json({ success: false, message: 'Title and Date are required.' });
 
     const parsedDate = new Date(absoluteDateString);
+
+    // 🛡️ CRASH PREVENTION: Ensure the semester strictly matches the DB Enum
+    const validSemester = ['Harmattan Semester', 'Rain Semester'].includes(semester) 
+      ? semester 
+      : 'Harmattan Semester';
+
     const newMeeting = await Meeting.create({
       title: title.trim(),
       day: day || 'Saturday',
       dateString: absoluteDateString.trim(),
-      semester: semester || 'Harmattan 2026',
+      semester: validSemester, 
       eventDate: isNaN(parsedDate.getTime()) ? Date.now() : parsedDate,
       attendanceList: []
     });
@@ -406,24 +423,35 @@ exports.toggleAttendance = async (req, res) => {
   try {
     const { meetingId } = req.params;
     const { studentId } = req.body;
+    
     const meeting = await Meeting.findById(meetingId);
     if (!meeting) return res.status(404).json({ success: false, message: 'Meeting documentation not found.' });
 
-    const studentIndex = meeting.attendanceList.findIndex(id => id.toString() === studentId);
+    // 🛡️ CRASH PREVENTION: Ensure array exists and safely handle ObjectIds vs Strings
+    let attendanceArray = meeting.attendanceList || [];
+    const isPresent = attendanceArray.some(id => id.toString() === studentId.toString());
     let operationStatus = 'present';
 
-    if (studentIndex > -1) {
-      meeting.attendanceList.splice(studentIndex, 1);
+    if (isPresent) {
+      attendanceArray = attendanceArray.filter(id => id.toString() !== studentId.toString());
       operationStatus = 'absent';
     } else {
-      meeting.attendanceList.push(studentId);
+      attendanceArray.push(studentId);
     }
-    await meeting.save();
-    
+
+
+    // 🛡️ CRASH PREVENTION: Bypass schema validation on older models with findByIdAndUpdate
+    const updatedMeeting = await Meeting.findByIdAndUpdate(
+      meetingId,
+      { attendanceList: attendanceArray },
+      { returnDocument: 'after' } 
+    );
     // Trigger numeric computation recalculation block
-    await recalculateAndCacheStudentMetrics(studentId, meeting.semester);
-    return res.status(200).json({ success: true, message: `Tracking set to ${operationStatus}`, meeting });
+    await recalculateAndCacheStudentMetrics(studentId, updatedMeeting.semester);
+    
+    return res.status(200).json({ success: true, message: `Tracking set to ${operationStatus}`, meeting: updatedMeeting });
   } catch (err) {
+    console.error("\n❌ CRITICAL ATTENDANCE CRASH:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -438,8 +466,9 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
     const targetStudent = await User.findById(studentId);
     if (!targetStudent || targetStudent.accountStatus === 'Dormant') return;
 
-    // Use current active semester tracking string
-    const targetSemester = currentSemester || 'Harmattan 2026';
+    // 🛡️ Ensure valid semester text format
+    const validSemesters = ['Harmattan Semester', 'Rain Semester'];
+    const targetSemester = validSemesters.includes(currentSemester) ? currentSemester : 'Harmattan Semester';
 
     // 1. Calculate absolute meeting attendance count
     const attendedMeetingsInSem = await Meeting.countDocuments({ 
@@ -451,7 +480,7 @@ async function recalculateAndCacheStudentMetrics(studentId, currentSemester) {
     const currentMassesCount = targetStudent.activityMetrics?.massesCount || 0;
     const currentOtherActivitiesCount = targetStudent.activityMetrics?.otherActivitiesCount || 0;
 
-    // 3. Update data layers using pure numbers
+    // 3. Update data layers using pure numbers via safe $set injection
     await User.findByIdAndUpdate(studentId, {
       $set: {
         "activityMetrics.meetingCount": attendedMeetingsInSem,

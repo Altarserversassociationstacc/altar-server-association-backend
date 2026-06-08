@@ -39,6 +39,10 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ message: 'Not authorized, account no longer exists' });
       }
 
+      // 🛠️ THE CRITICAL BRIDGE FIX: 
+      // Controllers look for req.user, so we must safely map req.admin to req.user
+      req.user = req.admin; 
+
       return next();
     } catch (error) {
       console.error(`❌ [Auth Error]: ${error.name} - ${error.message}`);

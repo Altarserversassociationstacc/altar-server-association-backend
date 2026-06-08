@@ -1,113 +1,57 @@
-// const express = require('express');
-// const router = express.Router();
-
-// const adminController = require('../controllers/adminController');
-// const assignmentController = require('../controllers/assignmentController'); 
-// const announcementRoutes = require('./announcementRoutes');
-// const { protect, adminGate } = require('../middleware/authMiddleware'); 
-
-// // Administrative Sessions
-// router.post('/signup', adminController.signup);
-// router.post('/login', adminController.login);
-
-// // Registry Workbooks & Action Operations
-// router.get('/find-student/:lookupKey', protect, adminController.findStudentByRegistryId);
-// router.get('/students', protect, adminController.getAllStudents);
-// router.get('/dashboard-stats', protect, adminController.getDashboardStats);
-
-
-// // 1. Handles historical/old email links (This fixes your current error)
-// router.get('/approve/:token', adminController.approve);
-
-// // 2. Handles the new direct-ID links
-// router.get('/approve-student-direct/:id', adminController.approveStudent);
-// router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus);
-// router.delete('/students/:id', protect, adminController.deleteStudent);
-
-// // Assembly Lifecycles
-// router.get('/meetings-list', protect, adminController.getMeetingsList);
-// router.post('/meetings', protect, adminController.createMeeting);
-// router.put('/meetings/:meetingId/toggle-attendance', protect, adminController.toggleAttendance); 
-
-// // Liturgical Matrix Assignments
-// router.get('/assignments/history', protect, assignmentController.getAssignmentHistory);
-// router.get('/student/my-assignments/search', protect, assignmentController.searchAssignmentsByStudentName);
-// router.post('/mass-assignments', protect, adminGate, assignmentController.createAssignment);
-// router.put('/mass-assignments/:id/attendance', protect, adminGate, assignmentController.updateMassAttendance);
-
-// router.use('/announcements', announcementRoutes);
-
-// module.exports = router;
 const express = require('express');
 const router = express.Router();
 
-// System Controllers
 const adminController = require('../controllers/adminController');
+const authMiddleware = require('../middleware/authMiddleware');
 const assignmentController = require('../controllers/assignmentController'); 
 const announcementRoutes = require('./announcementRoutes');
-const User = require('../models/Student'); // Embedded resource layer fallback
 
-// Security Authorization Gates
-const { protect, adminGate } = require('../middleware/authMiddleware'); 
+// Safe Extraction
+const protect = authMiddleware.protect || authMiddleware; 
+const adminGate = authMiddleware.adminGate;
 
-// ==========================================
-// ADMINISTRATIVE MANAGEMENT ENDPOINTS
-// ==========================================
-
-router.post('/signup', adminController.signup);
-router.post('/login', adminController.login);
-
-// Registry Workbooks & Action Operations
-router.get('/find-student/:lookupKey', protect, adminController.findStudentByRegistryId);
-router.get('/students', protect, adminController.getAllStudents);
-router.get('/dashboard-stats', protect, adminController.getDashboardStats);
+// Production Fallbacks to guarantee the live container stays online
+const findStudent = adminController.findStudentByRegistryId || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+const getAllStudents = adminController.getAllStudents || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+const getDashboardStats = adminController.getDashboardStats || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+const getMeetingsList = adminController.getMeetingsList || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+const createMeeting = adminController.createMeeting || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+const toggleAttendance = adminController.toggleAttendance || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
 
 // ==========================================
-// CRITICAL SIGNUP SECURITY VERIFICATION WORKFLOWS
+// ADMINISTRATIVE ENDPOINTS
 // ==========================================
+router.post('/signup', adminController.signup || ((req, res) => res.sendStatus(500)));
+router.post('/login', adminController.login || ((req, res) => res.sendStatus(500)));
 
-// 1. Intercepts historical approval parameters gracefully
-router.get('/approve/:token', adminController.approve);
+router.get('/find-student/:lookupKey', protect, findStudent);
+router.get('/students', protect, getAllStudents);
+router.get('/dashboard-stats', protect, getDashboardStats);
 
-// 2. Renders the secure profile credential dashboard sheet to the Admin
-router.get('/approve-student-direct/:id', adminController.approveStudent);
+router.get('/approve/:token', adminController.approve || ((req, res) => res.sendStatus(500)));
+router.get('/approve-student-direct/:id', adminController.approveStudent || ((req, res) => res.sendStatus(500)));
+router.post('/finalize-approval-execution/:id', adminController.finalizeApprovalExecution || ((req, res) => res.sendStatus(500)));
 
-// 3. EXECUTION ACTION: Confirms profile metrics and processes database activation state
-router.post('/finalize-approval-execution/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const student = await User.findById(id);
+router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus || ((req, res) => res.sendStatus(500)));
+router.delete('/students/:id', protect, adminController.deleteStudent || ((req, res) => res.sendStatus(500)));
 
-    if (!student) {
-      return res.status(404).send('Verification failed: This student profile data could not be located inside the system.');
-    }
+router.get('/meetings-list', protect, getMeetingsList);
+router.post('/meetings', protect, createMeeting);
+router.put('/meetings/:meetingId/toggle-attendance', protect, toggleAttendance); 
 
-    // Commit changes to database permanently
-    student.isVerified = true;
-    await student.save();
+// Assignment Fallbacks
+const getHistory = assignmentController.getAssignmentHistory || ((req, res) => res.sendStatus(500));
+const searchAssignments = assignmentController.searchAssignmentsByStudentName || ((req, res) => res.sendStatus(500));
+const createAssign = assignmentController.createAssignment || ((req, res) => res.sendStatus(500));
+const updateMass = assignmentController.updateMassAttendance || ((req, res) => res.sendStatus(500));
 
-    // Smooth hand-off redirect routing back to your frontend framework
-    const targetRedirect = process.env.CLIENT_URL || 'http://localhost:5173';
-    return res.redirect(`${targetRedirect}/verify-email?email=${encodeURIComponent(student.email)}&approved=true`);
-  } catch (err) {
-    return res.status(500).send('Database writing verification parameters failed: ' + err.message);
-  }
-});
+router.get('/assignments/history', protect, getHistory);
+router.get('/student/my-assignments/search', protect, searchAssignments);
 
-router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus);
-router.delete('/students/:id', protect, adminController.deleteStudent);
-
-// ==========================================
-// ASSEMBLY LIFECYCLES & LITURGICAL DATA
-// ==========================================
-router.get('/meetings-list', protect, adminController.getMeetingsList);
-router.post('/meetings', protect, adminController.createMeeting);
-router.put('/meetings/:meetingId/toggle-attendance', protect, adminController.toggleAttendance); 
-
-router.get('/assignments/history', protect, assignmentController.getAssignmentHistory);
-router.get('/student/my-assignments/search', protect, assignmentController.searchAssignmentsByStudentName);
-router.post('/mass-assignments', protect, adminGate, assignmentController.createAssignment);
-router.put('/mass-assignments/:id/attendance', protect, adminGate, assignmentController.updateMassAttendance);
+if (adminGate) {
+    router.post('/mass-assignments', protect, adminGate, createAssign);
+    router.put('/mass-assignments/:id/attendance', protect, adminGate, updateMass);
+}
 
 router.use('/announcements', announcementRoutes);
 

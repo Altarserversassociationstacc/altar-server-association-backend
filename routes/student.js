@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { signup, verify, resendCode, magicVerify, login, forgotPassword, resetPassword, completeProfile, getActivityStats, markAttendance, sendCorrespondence, requestCommunityAccess, lockProfile, deleteAccount, checkStatus } = require('../controllers/student');
+const { signup, verify, resendCode, magicVerify, login, forgotPassword, resetPassword, completeProfile, getActivityStats, markAttendance, sendCorrespondence, requestCommunityAccess, lockProfile, deleteAccount, checkStatus,getLiturgicalToday } = require('../controllers/student');
 
 router.post('/signup', signup);
 router.post('/verify', verify);
@@ -17,4 +17,5 @@ router.post('/community-request/:id', requestCommunityAccess);
 router.put('/lock-profile/:id', lockProfile);
 router.delete('/delete-account/:id', deleteAccount);
 router.get('/check-status/:email', checkStatus);
+router.get('/liturgical-today', getLiturgicalToday);
 module.exports = router;
