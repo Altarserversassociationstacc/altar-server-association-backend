@@ -68,8 +68,42 @@ const adminGate = (req, res, next) => {
     message: 'Access Denied: High-level administrative clearance privileges required.' 
   });
 };
+const paymentGate = (req, res, next) => {
+  // 1. Ensure the user object exists from the 'protect' middleware
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ message: 'Authentication required for clearance check.' });
+  }
+
+  // 2. Bypass check if it's an Admin masquerading or performing administrative overrides
+  if (user.role === 'admin' && !req.isStudent) {
+    return next();
+  }
+
+  // 3. Extract target session/level from request body or query parameters
+  const targetYear = req.body.academicYear || req.query.academicYear || "2025/2026";
+  const targetLevel = req.body.level || req.user.currentLevel;
+
+  // 4. Inspect the Entitlement Ledger
+  const clearanceRecord = user.sessionClearance?.find(
+    record => record.academicYear === targetYear && record.level === targetLevel
+  );
+
+  // 5. Enforcement Blocker
+  if (!clearanceRecord || clearanceRecord.paymentStatus !== 'Unlocked') {
+    return res.status(403).json({
+      success: false,
+      code: 'PAYMENT_REQUIRED',
+      message: `Access Denied: Sessional dues for ${targetLevel} (${targetYear}) must be settled to unlock this portal.`
+    });
+  }
+
+  return next();
+};
 
 module.exports = { 
   protect, 
-  adminGate 
+  adminGate,
+  paymentGate // 👈 Don't forget to export the new shield
 };
+

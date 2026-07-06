@@ -278,7 +278,23 @@ exports.getActivityStats = async (req, res) => {
     const user = await User.findById(id);
     
     if (!user) return res.status(404).json({ message: 'Student record not found.' });
+  const Payment = require('../models/Payment'); // Verify this model name
+    const paymentStats = await Payment.aggregate([
+      { 
+        $match: { 
+          studentId: new mongoose.Types.ObjectId(id), 
+          status: 'success' // 👈 Make sure this matches your DB status for successful payments
+        } 
+      },
+      { 
+        $group: { 
+          _id: null, 
+          totalPaid: { $sum: "$amount" } 
+        } 
+      }
+    ]);
 
+    const totalDuesPaid = paymentStats.length > 0 ? paymentStats[0].totalPaid : 0;
     const semesterStartDate = new Date('2026-01-01'); 
     const weeksElapsed = Math.max(1, Math.ceil((Date.now() - semesterStartDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
 
@@ -407,6 +423,7 @@ exports.getActivityStats = async (req, res) => {
       otherActivitiesCount, 
       massesCount: massesServedCount,      
       massGivenCount: massesAllocatedCount, 
+      totalDuesPaid, 
       massesAllocatedDates, 
       massesServedDates,    
       weeksElapsed,

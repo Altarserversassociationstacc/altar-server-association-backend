@@ -1,15 +1,15 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const dns = require('dns');
 const path = require('path');
-
-// 🎯 CRITICAL BOOT SEQUENCE: Load configuration BEFORE requiring local routes/controllers
-dns.setServers(['8.8.8.8', '8.8.4.4']); 
-dotenv.config(); 
-
 const mongoose = require('mongoose');
 const cors = require('cors');
+const dns = require('dns'); // 👈 1. Import the native DNS module
 
+// Load Environment Variables
+dotenv.config();
+
+// Set global DNS servers to Google to bypass local ISP timeouts
+dns.setServers(['8.8.8.8', '8.8.4.4']); // 👈 2. Add this line right here!
 // App Routers
 const studentRoutes = require('./routes/student'); 
 const notificationRoutes = require('./routes/notification'); 
@@ -19,6 +19,7 @@ const adminApprovalRoutes = require('./routes/admin');
 const announcementRoutes = require('./routes/announcementRoutes'); 
 const eventRoutes = require('./routes/eventRoutes'); 
 const galleryRoutes = require('./routes/galleryRoutes'); 
+const paymentRouter = require('./routes/paymentRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 10000; 
@@ -29,14 +30,15 @@ app.use(cors({
     'http://localhost:3000', 
     'http://localhost:5173', 
     'http://localhost:5174', 
-    process.env.FRONTEND_URL, // Whitelists your frontend URL variable
-    process.env.CLIENT_URL    // ✅ FIXED: Safely whitelists CLIENT_URL too so CORS never blocks you!
-  ].filter(Boolean),          // Cleans out any undefined environment values safely
+    process.env.FRONTEND_URL, 
+    process.env.CLIENT_URL    
+  ].filter(Boolean),          
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'user-id'],
   credentials: true
 }));
 
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -47,11 +49,11 @@ const connectDB = async () => {
     const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/hostel_db', {
       serverSelectionTimeoutMS: 5000, 
       socketTimeoutMS: 45000,
-      family: 4 
+      
     });
     console.log(`\x1b[38;5;208mMongoDB Connected: ${conn.connection.host}\x1b[0m`);
   } catch (error) {
-    console.error(`MongoDB Connection Error: ${error.message}`);
+    console.error(`\x1b[31mMongoDB Connection Error: ${error.message}\x1b[0m`);
     process.exit(1);
   }
 };
@@ -68,20 +70,24 @@ const startServer = async () => {
   app.use('/api/events', eventRoutes); 
   app.use('/api/gallery', galleryRoutes); 
   app.use('/api/notifications', notificationRoutes); 
+  app.use('/api/payment', paymentRouter);
 
-  // Fallbacks & Error Handlers
+  // Fallbacks & 404 Handler
   app.use((req, res, next) => {
     res.status(404).json({ success: false, message: `API Route Not Found: ${req.method} ${req.originalUrl}` });
   });
 
+  // Global Error Processing Pipeline
   app.use((err, req, res, next) => {
     console.error(`\x1b[31m[Server Error]\x1b[0m`, err);
-    res.status(err.status || 500).json({ success: false, message: err.message || 'Internal Server Error' });
+    res.status(err.status || 500).json({ 
+      success: false, 
+      message: err.message || 'Internal Server Error' 
+    });
   });
 
-  // The '0.0.0.0' is essential for Render to see your server
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running live on port ${PORT}`);
+    console.log(`\x1b[32mServer is running live on port ${PORT}\x1b[0m`);
   });
 };
 

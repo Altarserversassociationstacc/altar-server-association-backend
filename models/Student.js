@@ -79,6 +79,17 @@ const StudentSchema = new mongoose.Schema({
       default: 0 
     }
   }],
+  sessionClearance: [{
+    academicYear: { type: String, required: true }, // e.g., "2025/2026"
+    level: { type: String, required: true },        // e.g., "400L"
+    paymentStatus: { 
+      type: String, 
+      enum: ['Locked', 'Unlocked'], 
+      default: 'Locked' 
+    },
+    paymentReference: { type: String }, // Maps to the Paystack trxref
+    unlockedAt: { type: Date }
+  }],
 
   verificationCode: String,
   verificationToken: String,

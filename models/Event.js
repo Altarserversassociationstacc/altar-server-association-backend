@@ -4,7 +4,7 @@ const eventSchema = new mongoose.Schema({
   title: { type: String, required: true },
   category: { 
     type: String, 
-    enum: ["Workshops", "Seminars", "Liturgical Competitions", "Fellowship", "Meetings"],
+    enum: ["All Events", "General", "General Meetings", "General Practice", "ASA Novena", "ASA Chaplaincy Cup", "Sendforth Events"],
     required: true 
   },
   description: { type: String, required: true },
