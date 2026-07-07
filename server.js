@@ -31,7 +31,8 @@ app.use(cors({
     'http://localhost:5173', 
     'http://localhost:5174', 
     process.env.FRONTEND_URL, 
-    process.env.CLIENT_URL    
+    process.env.CLIENT_URL,
+    process.env.ADMIN_URL   
   ].filter(Boolean),          
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'user-id'],
