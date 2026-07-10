@@ -120,6 +120,15 @@ exports.updateExecutive = async (req, res) => {
     }
 
     let updateData = { ...req.body };
+    
+    // 🛡️ SANITIZATION: Prevent empty strings from wiping out required fields
+    const requiredFields = ['name', 'position', 'email', 'phoneNumber'];
+    requiredFields.forEach(field => {
+      if (updateData[field] === '') {
+        delete updateData[field]; // Removes the empty string so Mongoose uses the existing data
+      }
+    });
+
     if (updateData.isGroupPhoto !== undefined) {
       updateData.isGroupPhoto = String(updateData.isGroupPhoto) === 'true';
     }
@@ -146,9 +155,9 @@ exports.updateExecutive = async (req, res) => {
       id,
       updateData,
       { 
-        new: true,           
-        runValidators: true, 
-        context: 'query'     
+        returnDocument: 'after', // ✅ Fixed Mongoose Deprecation Warning
+        runValidators: true,     // ✅ Keeps your database secure
+        context: 'query' 
       }
     );
 
@@ -163,9 +172,6 @@ exports.updateExecutive = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Update failed.' });
   }
 };
-
-// @desc    Delete an executive profile and purge cloud assets
-// @route   DELETE /api/executives/:id
 exports.deleteExecutive = async (req, res) => {
   try {
     const executive = await Executive.findById(req.params.id);
