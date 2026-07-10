@@ -1,48 +1,74 @@
 const mongoose = require('mongoose');
 
+/**
+ * Executive Schema
+ * Represents either a specific student official or a session-wide group portrait.
+ */
 const ExecutiveSchema = new mongoose.Schema({
   sessionYear: {
     type: String,
-    required: true,
+    required: [true, 'Session year is required'],
+    trim: true,
+    index: true // Optimized for filtering by year
   },
   executiveName: {
     type: String,
-    required: function() { return !this.isGroupPhoto; },
+    required: [true, 'Executive/Council name is required'],
+    trim: true
   },
   name: {
     type: String,
-    // Required only if it's an individual executive, not for a group photo
     required: function() { return !this.isGroupPhoto; },
+    trim: true
   },
   position: {
     type: String,
-    // Required only if it's an individual executive
     required: function() { return !this.isGroupPhoto; },
+    trim: true
   },
   bio: {
     type: String,
+    trim: true
   },
-  // Department, email, and phoneNumber are required only for individual executives
   department: {
     type: String,
     required: function() { return !this.isGroupPhoto; },
+    trim: true
   },
   email: {
     type: String,
-    required: function() { return !this.isGroupPhoto; },
+    lowercase: true,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        if (!this.isGroupPhoto && v) return /^\S+@\S+\.\S+$/.test(v);
+        return true;
+      },
+      message: 'Please provide a valid email address'
+    },
+    required: function() { return !this.isGroupPhoto; }
   },
   phoneNumber: {
     type: String,
     required: function() { return !this.isGroupPhoto; },
+    trim: true
   },
   imageUrl: {
     type: String,
-    required: true,
+    required: [true, 'Image URL is required']
   },
   isGroupPhoto: {
     type: Boolean,
     default: false,
-  },
-}, { timestamps: true }); // Adds createdAt and updatedAt
+    index: true // Optimized for separating group vs individual views
+  }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Helper index for common lookup patterns
+ExecutiveSchema.index({ sessionYear: 1, isGroupPhoto: 1 });
 
 module.exports = mongoose.model('Executive', ExecutiveSchema);
