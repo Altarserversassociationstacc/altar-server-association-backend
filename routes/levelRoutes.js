@@ -1,10 +1,10 @@
-import express from 'express';
-import { 
+const express = require('express');
+const { 
   createStudent, 
   getStudents, 
   saveGroupPhoto, 
   getGroupPhoto 
-} from '../controllers/levelController.js';
+} = require('../controllers/levelController');
 
 const router = express.Router();
 
@@ -18,4 +18,4 @@ router.route('/group-photo')
   .post(saveGroupPhoto)
   .get(getGroupPhoto);
 
-export default router;
+module.exports = router;
