@@ -1,11 +1,11 @@
-import LevelStudent from '../models/LevelStudent.js';
-import GroupPhoto from '../models/GroupPhoto.js';
+const LevelStudent = require('../models/LevelStudent');
+const GroupPhoto = require('../models/GroupPhoto');
 
 // --- STUDENT ROSTER CONTROLLERS ---
 
 // @desc    Add a new student to a level
 // @route   POST /api/levels/students
-export const createStudent = async (req, res) => {
+const createStudent = async (req, res) => {
   try {
     const { 
       fullName, imageUrl, skills, state, 
@@ -37,7 +37,7 @@ export const createStudent = async (req, res) => {
 
 // @desc    Get students by level and academic year
 // @route   GET /api/levels/students?level=100-Level&year=2026/2027
-export const getStudents = async (req, res) => {
+const getStudents = async (req, res) => {
   try {
     const { level, year } = req.query;
     
@@ -56,7 +56,7 @@ export const getStudents = async (req, res) => {
 
 // @desc    Add or Update Level Group Photo
 // @route   POST /api/levels/group-photo
-export const saveGroupPhoto = async (req, res) => {
+const saveGroupPhoto = async (req, res) => {
   try {
     const { levelName, academicYear, imageUrl, caption } = req.body;
 
@@ -75,7 +75,7 @@ export const saveGroupPhoto = async (req, res) => {
 
 // @desc    Get Level Group Photo
 // @route   GET /api/levels/group-photo?level=100-Level&year=2026/2027
-export const getGroupPhoto = async (req, res) => {
+const getGroupPhoto = async (req, res) => {
   try {
     const { level, year } = req.query;
 
@@ -89,4 +89,11 @@ export const getGroupPhoto = async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
+};
+
+module.exports = {
+  createStudent,
+  getStudents,
+  saveGroupPhoto,
+  getGroupPhoto
 };
