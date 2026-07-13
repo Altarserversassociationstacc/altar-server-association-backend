@@ -81,8 +81,13 @@ const getGroupPhoto = async (req, res) => {
 
     const photo = await GroupPhoto.findOne({ levelName: level, academicYear: year });
     
+    // 🟢 Instead of res.status(404), return 200 with data: null so React doesn't crash!
     if (!photo) {
-      return res.status(404).json({ success: false, message: 'No group photo found for this session.' });
+      return res.status(200).json({ 
+        success: true, 
+        data: null, 
+        message: 'No group photo uploaded for this session yet.' 
+      });
     }
 
     res.status(200).json({ success: true, data: photo });
