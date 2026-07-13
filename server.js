@@ -20,6 +20,7 @@ const announcementRoutes = require('./routes/announcementRoutes');
 const eventRoutes = require('./routes/eventRoutes'); 
 const galleryRoutes = require('./routes/galleryRoutes'); 
 const paymentRouter = require('./routes/paymentRoutes');
+const levelRoutes = require('./routes/levelRoutes'); 
 
 const app = express();
 const PORT = process.env.PORT || 10000; 
