@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const levelStudentSchema = new mongoose.Schema({
   fullName: {
@@ -46,5 +46,4 @@ const levelStudentSchema = new mongoose.Schema({
     trim: true
   }
 }, { timestamps: true });
-
-export default mongoose.model('LevelStudent', levelStudentSchema);
+module.exports = mongoose.model('LevelStudent', levelStudentSchema);
