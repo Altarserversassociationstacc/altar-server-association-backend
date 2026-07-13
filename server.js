@@ -72,6 +72,7 @@ const startServer = async () => {
   app.use('/api/gallery', galleryRoutes); 
   app.use('/api/notifications', notificationRoutes); 
   app.use('/api/payment', paymentRouter);
+  app.use('/api/levels', levelRoutes);
 
   // Fallbacks & 404 Handler
   app.use((req, res, next) => {
