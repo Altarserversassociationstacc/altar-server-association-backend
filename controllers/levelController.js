@@ -1,10 +1,7 @@
+const mongoose = require('mongoose'); // 🟢 ADDED: Required for ObjectId validation
 const LevelStudent = require('../models/LevelStudent');
 const GroupPhoto = require('../models/GroupPhoto');
 
-// --- STUDENT ROSTER CONTROLLERS ---
-
-// @desc    Add a new student to a level
-// @route   POST /api/levels/students
 const createStudent = async (req, res) => {
   try {
     const { 
@@ -12,7 +9,6 @@ const createStudent = async (req, res) => {
       homeOfResidence, email, phoneNumber, level, academicYear 
     } = req.body;
 
-    // Convert comma-separated skills string into an array if sent as text
     const formattedSkills = Array.isArray(skills) 
       ? skills 
       : skills?.split(',').map(skill => skill.trim()).filter(Boolean) || [];
@@ -35,8 +31,6 @@ const createStudent = async (req, res) => {
   }
 };
 
-// @desc    Get students by level and academic year
-// @route   GET /api/levels/students?level=100-Level&year=2026/2027
 const getStudents = async (req, res) => {
   try {
     const { level, year } = req.query;
@@ -52,15 +46,72 @@ const getStudents = async (req, res) => {
   }
 };
 
-// --- GROUP PHOTO CONTROLLERS ---
+const getStudentById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-// @desc    Add or Update Level Group Photo
-// @route   POST /api/levels/group-photo
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID format' });
+    }
+
+    const student = await LevelStudent.findById(id);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    res.status(200).json({ success: true, data: student });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID format' });
+    }
+
+    const updatedStudent = await LevelStudent.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedStudent) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    res.status(200).json({ success: true, data: updatedStudent });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+const deleteStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID format' });
+    }
+
+    const deletedStudent = await LevelStudent.findByIdAndDelete(id);
+
+    if (!deletedStudent) {
+      return res.status(404).json({ success: false, message: 'Student already removed or does not exist' });
+    }
+
+    res.status(200).json({ success: true, message: 'Student successfully removed' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 const saveGroupPhoto = async (req, res) => {
   try {
     const { levelName, academicYear, imageUrl, caption } = req.body;
 
-    // Automatically update if that year's photo already exists, or create new
     const groupPhoto = await GroupPhoto.findOneAndUpdate(
       { levelName, academicYear },
       { imageUrl, caption },
@@ -73,15 +124,12 @@ const saveGroupPhoto = async (req, res) => {
   }
 };
 
-// @desc    Get Level Group Photo
-// @route   GET /api/levels/group-photo?level=100-Level&year=2026/2027
 const getGroupPhoto = async (req, res) => {
   try {
     const { level, year } = req.query;
 
     const photo = await GroupPhoto.findOne({ levelName: level, academicYear: year });
     
-    // 🟢 Instead of res.status(404), return 200 with data: null so React doesn't crash!
     if (!photo) {
       return res.status(200).json({ 
         success: true, 
@@ -96,9 +144,52 @@ const getGroupPhoto = async (req, res) => {
   }
 };
 
+// 🟢 ADDED: Missing updateGroupPhoto handler
+const updateGroupPhoto = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid photo ID format' });
+    }
+
+    const updatedPhoto = await GroupPhoto.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
+    if (!updatedPhoto) {
+      return res.status(404).json({ success: false, message: 'Group photo not found' });
+    }
+
+    res.status(200).json({ success: true, data: updatedPhoto });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// 🟢 ADDED: Missing deleteGroupPhoto handler
+const deleteGroupPhoto = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid photo ID format' });
+    }
+
+    const deletedPhoto = await GroupPhoto.findByIdAndDelete(id);
+    if (!deletedPhoto) {
+      return res.status(404).json({ success: false, message: 'Group photo not found' });
+    }
+
+    res.status(200).json({ success: true, message: 'Group photo removed' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createStudent,
   getStudents,
+  getStudentById,
+  updateStudent,
+  deleteStudent,
   saveGroupPhoto,
-  getGroupPhoto
+  getGroupPhoto,
+  updateGroupPhoto, // 🟢 ADDED to exports
+  deleteGroupPhoto  // 🟢 ADDED to exports
 };

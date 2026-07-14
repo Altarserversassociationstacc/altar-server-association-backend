@@ -1,60 +1,52 @@
 /**
  * @file levelRoutes.js
- * @description API routes for managing academic level student rosters and group photos.
+ * @description Router for academic level rosters and official group photos.
+ * @mount /api/levels
  */
 
 const express = require('express');
 const { 
   createStudent, 
   getStudents, 
+  getStudentById,
+  updateStudent,
+  deleteStudent,
   saveGroupPhoto, 
-  getGroupPhoto 
+  getGroupPhoto,
+  updateGroupPhoto,
+  deleteGroupPhoto 
 } = require('../controllers/levelController');
 
-// Optional: Import your auth/admin middleware if you have them in your project
+// Optional: Import authentication guards when ready for production
 // const { protect, authorizeAdmin } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-/* ==========================================================================
-   STUDENT ROSTER ENDPOINTS
-   Base Path: /api/levels/students
-   ========================================================================== */
+// ==========================================
+// STUDENT ROSTER ENDPOINTS
+// ==========================================
+
 router.route('/students')
-  /**
-   * @route   GET /api/levels/students
-   * @desc    Retrieve students (supports filtering by level and academicYear)
-   * @access  Public
-   */
   .get(getStudents)
+  .post(createStudent); // e.g., .post(protect, authorizeAdmin, createStudent)
 
-  /**
-   * @route   POST /api/levels/students
-   * @desc    Add a new student profile to a specific level roster
-   * @access  Private / Admin Only
-   * @example .post(protect, authorizeAdmin, createStudent) // Un-comment when auth is ready
-   */
-  .post(createStudent);
+router.route('/students/:id')
+  .get(getStudentById)
+  .put(updateStudent)
+  .delete(deleteStudent);
 
 
-/* ==========================================================================
-   GROUP PHOTO ENDPOINTS
-   Base Path: /api/levels/group-photo
-   ========================================================================== */
+// ==========================================
+// GROUP PHOTO ENDPOINTS
+// ==========================================
+
 router.route('/group-photo')
-  /**
-   * @route   GET /api/levels/group-photo
-   * @desc    Retrieve the official group photo for a level and academic year
-   * @access  Public
-   */
   .get(getGroupPhoto)
-
-  /**
-   * @route   POST /api/levels/group-photo
-   * @desc    Upload or update the official group photo for a level session
-   * @access  Private / Admin Only
-   * @example .post(protect, authorizeAdmin, saveGroupPhoto) // Un-comment when auth is ready
-   */
   .post(saveGroupPhoto);
+
+router.route('/group-photo/:id')
+  .put(updateGroupPhoto)
+  .delete(deleteGroupPhoto);
+
 
 module.exports = router;
