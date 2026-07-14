@@ -25,7 +25,7 @@ const paymentSchema = new mongoose.Schema({
     enum: [ 'success', 'failed'],
     default: 'success'
   },
-  narration: {
+  narration: {a
     type: String,
     required: true,
     enum: [
