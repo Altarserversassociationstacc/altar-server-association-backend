@@ -2,57 +2,90 @@ const express = require('express');
 const router = express.Router();
 
 const adminController = require('../controllers/adminController');
-const authMiddleware = require('../middleware/authMiddleware');
+const meetingController = require('../controllers/meetingController'); // 🚀 Explicit import prevents 404s
 const assignmentController = require('../controllers/assignmentController'); 
 const announcementRoutes = require('./announcementRoutes');
+const authMiddleware = require('../middleware/authMiddleware');
 
-// Safe Extraction
 const protect = authMiddleware.protect || authMiddleware; 
-const adminGate = authMiddleware.adminGate;
+const adminGate = authMiddleware.adminGate || ((req, res, next) => next());
 
-// Production Fallbacks to guarantee the live container stays online
-const findStudent = adminController.findStudentByRegistryId || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
-const getAllStudents = adminController.getAllStudents || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
-const getDashboardStats = adminController.getDashboardStats || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
-const getMeetingsList = adminController.getMeetingsList || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
-const createMeeting = adminController.createMeeting || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
-const toggleAttendance = adminController.toggleAttendance || ((req, res) => res.status(500).json({ error: "Feature unavailable" }));
+/**
+ * Higher-Order Function to guarantee container uptime.
+ * Returns 503 Service Unavailable if a handler is uninitialized instead of dropping routes.
+ */
+const createSafeHandler = (handler, endpointName) => {
+  if (typeof handler === 'function') return handler;
+  console.warn(`[Router Warning] Handler missing for endpoint: ${endpointName}. Defaulting to safe fallback.`);
+  return (req, res) => res.status(503).json({ 
+    success: false, 
+    error: "Service Temporarily Unavailable",
+    details: `The requested handler (${endpointName}) is not currently initialized.`
+  });
+};
 
 // ==========================================
-// ADMINISTRATIVE ENDPOINTS
+// AUTHENTICATION & CORE ADMIN ENDPOINTS
 // ==========================================
-router.post('/signup', adminController.signup || ((req, res) => res.sendStatus(500)));
-router.post('/login', adminController.login || ((req, res) => res.sendStatus(500)));
+router.post('/signup', createSafeHandler(adminController.signup, 'signup'));
+router.post('/login', createSafeHandler(adminController.login, 'login'));
 
-router.get('/find-student/:lookupKey', protect, findStudent);
-router.get('/students', protect, getAllStudents);
-router.get('/dashboard-stats', protect, getDashboardStats);
+router.get('/dashboard-stats', protect, createSafeHandler(adminController.getDashboardStats, 'getDashboardStats'));
+router.get('/students', protect, createSafeHandler(adminController.getAllStudents, 'getAllStudents'));
+router.get('/find-student/:lookupKey', protect, createSafeHandler(adminController.findStudentByRegistryId, 'findStudentByRegistryId'));
 
-router.get('/approve/:token', adminController.approve || ((req, res) => res.sendStatus(500)));
-router.get('/approve-student-direct/:id', adminController.approveStudent || ((req, res) => res.sendStatus(500)));
-router.post('/finalize-approval-execution/:id', adminController.finalizeApprovalExecution || ((req, res) => res.sendStatus(500)));
+// ==========================================
+// APPROVAL & STUDENT STATUS WORKFLOWS
+// ==========================================
+router.get('/approve/:token', createSafeHandler(adminController.approve, 'approve'));
+router.get('/approve-student-direct/:id', createSafeHandler(adminController.approveStudent, 'approveStudent'));
+router.post('/finalize-approval-execution/:id', createSafeHandler(adminController.finalizeApprovalExecution, 'finalizeApprovalExecution'));
 
-router.put('/update-student-status/:studentId', protect, adminController.updateStudentStatus || ((req, res) => res.sendStatus(500)));
-router.delete('/students/:id', protect, adminController.deleteStudent || ((req, res) => res.sendStatus(500)));
+router.route('/students/:id')
+  .delete(protect, createSafeHandler(adminController.deleteStudent, 'deleteStudent'));
 
-router.get('/meetings-list', protect, getMeetingsList);
-router.post('/meetings', protect, createMeeting);
-router.put('/meetings/:meetingId/toggle-attendance', protect, toggleAttendance); 
+router.put('/update-student-status/:studentId', protect, createSafeHandler(adminController.updateStudentStatus, 'updateStudentStatus'));
 
-// Assignment Fallbacks
-const getHistory = assignmentController.getAssignmentHistory || ((req, res) => res.sendStatus(500));
-const searchAssignments = assignmentController.searchAssignmentsByStudentName || ((req, res) => res.sendStatus(500));
-const createAssign = assignmentController.createAssignment || ((req, res) => res.sendStatus(500));
-const updateMass = assignmentController.updateMassAttendance || ((req, res) => res.sendStatus(500));
+// ==========================================
+// MEETING & ATTENDANCE MANAGEMENT
+// ==========================================
+// 1. Root collection endpoints & legacy list support
+router.get('/meetings-list', protect, createSafeHandler(meetingController.getMeetingsList, 'getMeetingsList'));
+router.route('/meetings')
+  .get(protect, createSafeHandler(meetingController.getMeetingsList, 'getMeetingsList'))
+  .post(protect, createSafeHandler(meetingController.createMeeting, 'createMeeting'));
 
-router.get('/assignments/history', protect, getHistory);
-router.get('/student/my-assignments/search', protect, searchAssignments);
+// 2. Specific action endpoints must precede generic resource IDs
+router.put(
+  '/meetings/:meetingId/toggle-attendance', 
+  protect, 
+  createSafeHandler(meetingController.toggleAttendance, 'toggleAttendance')
+); 
 
-if (adminGate) {
-    router.post('/mass-assignments', protect, adminGate, createAssign);
-    router.put('/mass-assignments/:id/attendance', protect, adminGate, updateMass);
-}
+// 3. 🚀 Standard RESTful Resource Routes for Edit & Delete (Resolves the 404s)
+router.route('/meetings/:id')
+  .put(protect, createSafeHandler(meetingController.updateMeeting, 'updateMeeting'))
+  .delete(protect, createSafeHandler(meetingController.deleteMeeting, 'deleteMeeting'));
 
+// ==========================================
+// ASSIGNMENT & MASS TRACKING
+// ==========================================
+router.get('/assignments/history', protect, createSafeHandler(assignmentController.getAssignmentHistory, 'getAssignmentHistory'));
+router.get('/student/my-assignments/search', protect, createSafeHandler(assignmentController.searchAssignmentsByStudentName, 'searchAssignmentsByStudentName'));
+
+router.route('/mass-assignments')
+  .post(protect, adminGate, createSafeHandler(assignmentController.createAssignment, 'createAssignment'));
+
+router.put(
+  '/mass-assignments/:id/attendance', 
+  protect, 
+  adminGate, 
+  createSafeHandler(assignmentController.updateMassAttendance, 'updateMassAttendance')
+);
+
+// ==========================================
+// SUB-ROUTERS
+// ==========================================
 router.use('/announcements', announcementRoutes);
 
 module.exports = router;

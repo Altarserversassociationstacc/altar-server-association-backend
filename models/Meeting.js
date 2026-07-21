@@ -10,7 +10,16 @@ const MeetingSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Meeting title is mandatory for registry indexing.'],
     trim: true,
-    // e.g., "General Assembly"
+  },
+  // 🟢 ADDED: Activity Type Field
+  type: {
+    type: String,
+    required: [true, 'Activity type is required.'],
+    enum: {
+      values: ['Meeting', 'Practice', 'Cloth Washing'],
+      message: '{VALUE} is not a valid activity type.'
+    },
+    default: 'Meeting'
   },
   day: {
     type: String,
@@ -20,27 +29,23 @@ const MeetingSchema = new mongoose.Schema({
   dateString: {
     type: String,
     required: [true, 'Human-readable date string is required for frontend display.'],
-    // e.g., "27th April 2026"
   },
   eventDate: {
     type: Date,
     required: [true, 'System Date object is required for chronological sorting.'],
-    // Used for backend sorting logic (e.g., .sort({ eventDate: -1 }))
   },
   semester: {
     type: String,
     required: [true, 'Semester allocation is required for performance audits.'],
     enum: {
-      // 🚀 UPDATED: Now uses Harmattan and Rain semesters
       values: ['Harmattan Semester', 'Rain Semester'],
-      message: '{VALUE} is not a valid academic semester. Please use "Harmattan Semester" or "Rain Semester".'
+      message: '{VALUE} is not a valid academic semester.'
     }
   },
   academicYear: {
     type: String,
-    default: '2025/2026', // Useful for historical archiving
+    default: '2025/2026',
   },
-  // High-performance array of Student ObjectIDs
   attendanceList: [
     {
       type: mongoose.Schema.Types.ObjectId,
@@ -49,12 +54,10 @@ const MeetingSchema = new mongoose.Schema({
   ]
 }, { 
   timestamps: true,
-  // Ensure that when converting to JSON, virtuals and getters are included
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
-// Virtual: Calculate attendance count without needing to load the whole list
 MeetingSchema.virtual('attendanceCount').get(function() {
   return this.attendanceList ? this.attendanceList.length : 0;
 });
