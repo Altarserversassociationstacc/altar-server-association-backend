@@ -4,17 +4,20 @@ const paymentSchema = new mongoose.Schema({
   studentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Student',
-    required: true
+    required: [true, 'Student ID is required']
   },
   studentName: {
     type: String,
-    required: true
+    required: true,
+    trim: true,
+    default: 'Portal User'
   },
   reference: {
     type: String,
     required: true,
     unique: true, 
-    index: true   
+    index: true,
+    trim: true
   },
   amount: {
     type: Number, 
@@ -22,34 +25,36 @@ const paymentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: [ 'success', 'failed'],
-    default: 'success',
+    enum: ['success', 'failed', 'pending'],
+    default: 'success'
   },
   narration: {
     type: String,
     required: true,
-    enum: [
-      'Sessional Dues', 
-      'Sendforth levy and Appeal fund card', 
-      'Donation', 
-      'Other Clearance'
-    ],
+    trim: true,
     default: 'Sessional Dues'
   },
   targetLevel: {
     type: String,
-    required: true 
+    required: true,
+    trim: true,
+    default: '100L'
   },
   academicYear: {
     type: String,
-    required: true 
+    required: true,
+    trim: true,
+    default: 'N/A'
   },
   session: {
     type: String,
-    required: true 
+    required: true,
+    trim: true,
+    default: 'N/A'
   },
   paidAt: {
-    type: Date
+    type: Date,
+    default: Date.now
   }
 }, { 
   timestamps: true 

@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const axios = require('axios'); 
 const https = require('https');
+const mongoose = require('mongoose');
 const User = require('../models/Student');
 const Payment = require('../models/Payment'); 
 const FeeConfig = require('../models/FeeConfig');
@@ -20,86 +21,89 @@ const ipv4Agent = new https.Agent({ family: 4 });
 const processDatabaseUnlock = async (metadata, reference, amountKobo) => {
   const { studentId, custom_fields } = metadata || {};
   
+  // Safely extract custom fields with fallback protection
   const getCustomField = (name, fallback) => {
-    const field = custom_fields?.find(f => f.variable_name === name);
-    return field ? field.value : fallback;
+    if (!Array.isArray(custom_fields)) return fallback;
+    const field = custom_fields.find(
+      f => f.variable_name === name || f.display_name?.toLowerCase() === name.toLowerCase()
+    );
+    // Ensure value is non-null, non-undefined, and non-empty string
+    return (field && field.value !== undefined && field.value !== null && String(field.value).trim() !== '')
+      ? String(field.value).trim()
+      : fallback;
   };
 
   const narration = getCustomField('narration', 'Sessional Dues');
   const levelToUnlock = getCustomField('level', '100L');
-  const academicYear = getCustomField('academic_year', 'Unknown');
-  const session = getCustomField('session', 'Unknown');
-  const amountNaira = amountKobo / 100;
+  const academicYear = getCustomField('academic_year', 'N/A');
+  const session = getCustomField('session', 'N/A');
+  const amountNaira = Number(amountKobo) / 100;
 
-  // 1. Check for existing successful payment to ensure idempotency
+  // 1. Validate Student ID format before database queries
+  if (!studentId || !mongoose.Types.ObjectId.isValid(studentId)) {
+    console.error(`❌ [Payment Unlock Error]: Invalid or missing studentId: "${studentId}" for reference: ${reference}`);
+    throw new Error(`Invalid student ID in payment metadata: ${studentId}`);
+  }
+
+  // 2. Check for existing completed payment to ensure idempotency
   const existingPayment = await Payment.findOne({ reference });
   if (existingPayment && existingPayment.status === 'success') {
     console.log(`ℹ️ [Payment] Reference ${reference} already processed. Skipping unlock.`);
     return { success: true, message: 'Already processed' };
   }
 
-  // 2. Reconcile Payment Ledger
-  let paymentRecord = await Payment.findOneAndUpdate(
+  // 3. Fetch Student Name for record
+  const student = await User.findById(studentId);
+  const studentName = student?.fullName || 'Portal User';
+
+  // 4. Atomic Upsert Payment Record (Prevents race conditions)
+  const paymentRecord = await Payment.findOneAndUpdate(
     { reference },
     {
       $set: {
+        studentId,
+        studentName,
+        amount: amountNaira,
+        narration,
+        targetLevel: levelToUnlock,
+        academicYear,
+        session,
         status: 'success',
-        paidAt: new Date(),
-        amount: amountNaira 
+        paidAt: new Date()
       }
     },
-    { returnDocument: 'after' } 
+    { new: true, upsert: true, setDefaultsOnInsert: true }
   );
 
-  // 3. Payment Record Creation
-  if (!paymentRecord) {
-    const student = await User.findById(studentId).select('fullName');
-    paymentRecord = await Payment.create({
-      studentId,
-      studentName: student?.fullName || 'Portal User',
-      reference,
-      amount: amountNaira,
-      narration,
-      targetLevel: levelToUnlock,
-      academicYear,
-      session,
-      status: 'success',
-      paidAt: new Date()
-    });
-  }
+  // 5. System Entitlement Unlock (The Clearance Gate)
+  if (student && narration === 'Sessional Dues') {
+    const clearanceIndex = student.sessionClearance.findIndex(
+      record => record.academicYear === academicYear && record.level === levelToUnlock
+    );
 
-  // 4. System Entitlement Unlock (The Clearance Gate)
-  if (narration === 'Sessional Dues' && studentId) {
-    const student = await User.findById(studentId);
-    if (student) {
-      const clearanceIndex = student.sessionClearance.findIndex(
-        record => record.academicYear === academicYear && record.level === levelToUnlock
-      );
+    const clearanceData = {
+      paymentStatus: 'Unlocked',
+      paymentReference: reference,
+      unlockedAt: new Date()
+    };
 
-      const clearanceData = {
-        paymentStatus: 'Unlocked',
-        paymentReference: reference,
-        unlockedAt: new Date()
-      };
-
-      if (clearanceIndex > -1) {
-        Object.assign(student.sessionClearance[clearanceIndex], clearanceData);
-      } else {
-        student.sessionClearance.push({
-          academicYear,
-          level: levelToUnlock,
-          ...clearanceData
-        });
-      }
-
-      // Advance operational state
-      student.currentLevel = levelToUnlock;
-      await student.save();
-      console.log(`✅ [Entitlement Granted]: Student ID ${studentId} unlocked for ${levelToUnlock} (${academicYear}).`);
+    if (clearanceIndex > -1) {
+      Object.assign(student.sessionClearance[clearanceIndex], clearanceData);
+    } else {
+      student.sessionClearance.push({
+        academicYear,
+        level: levelToUnlock,
+        ...clearanceData
+      });
     }
+
+    // Advance operational state
+    student.currentLevel = levelToUnlock;
+    await student.save();
+    console.log(`✅ [Entitlement Granted]: Student ID ${studentId} unlocked for ${levelToUnlock} (${academicYear}).`);
   }
 
-  return { success: true };
+  return { success: true, paymentRecord };
 };
 
 /**
@@ -143,7 +147,7 @@ exports.getFeeMatrix = async (req, res) => {
  */
 exports.handlePaystackWebhook = async (req, res) => {
   try {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const secret = process.process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY;
     const signature = req.headers['x-paystack-signature'];
 
     if (!secret || !signature) {
@@ -175,7 +179,7 @@ exports.handlePaystackWebhook = async (req, res) => {
     // Acknowledge receipt to prevent gateway retries
     return res.status(200).send('Event Procured.');
   } catch (error) {
-    console.error(`❌ [Webhook Interception Error]:`, error);
+    console.error(`❌ [Webhook Interception Error]:`, error.message);
     return res.status(500).send('Internal Server Error');
   }
 };
@@ -209,7 +213,10 @@ exports.verifyTransactionReference = async (req, res) => {
     return res.status(400).json({ success: false, message: "Transaction unresolved on server." });
   } catch (error) {
     console.error(`❌ [Manual Verification Error]:`, error.response?.data || error.message);
-    return res.status(500).json({ success: false, message: "System integration synchronization failure." });
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || "System integration synchronization failure." 
+    });
   }
 };
 

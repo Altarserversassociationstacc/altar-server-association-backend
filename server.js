@@ -5,8 +5,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dns = require('dns'); // 👈 1. Import the native DNS module
 
-// Load Environment Variables
-dotenv.config();
+// 👇 FIX: Force dotenv to look in the exact directory of this file
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Set global DNS servers to Google to bypass local ISP timeouts
 dns.setServers(['8.8.8.8', '8.8.4.4']); // 👈 2. Add this line right here!

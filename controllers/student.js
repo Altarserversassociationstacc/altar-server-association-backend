@@ -63,7 +63,7 @@ exports.signup = async (req, res) => {
 
     const adminHtml = emailTemplates.getAdminSignupTemplate(user, approveLink);
     const studentHtml = emailTemplates.getStudentVerificationTemplate(verificationCode, magicLink);
-
+  
     sendOAuth2Email('altarserversassociationstacc1@gmail.com', 'Action Required: New Registration Pending Approval', adminHtml);
     sendOAuth2Email(user.email, 'Verify Your Email - Altar Server Association', studentHtml);
 
@@ -242,7 +242,10 @@ exports.sendCorrespondence = async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found.' });
 
     const correspondenceHtml = emailTemplates.getCorrespondenceTemplate(user, recipient, subject, message);
-    await sendOAuth2Email(process.env.ASSOCIATION_EMAIL, `ASA Correspondence: ${subject}`, correspondenceHtml, user.email);
+   
+    const targetEmail = process.env.ASSOCIATION_EMAIL || 'altarserversassociationstacc1@gmail.com';
+    
+    await sendOAuth2Email(targetEmail, `ASA Correspondence: ${subject}`, correspondenceHtml, user.email);
 
     return res.status(200).json({ message: 'Correspondence sent successfully!' });
   } catch (err) {
