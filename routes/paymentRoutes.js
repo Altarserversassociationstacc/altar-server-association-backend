@@ -1,47 +1,29 @@
 const express = require('express');
 const router = express.Router();
-
-// 🧱 Controller Integrations
 const { 
+  initializePayment, 
   handlePaystackWebhook, 
   verifyTransactionReference,
   getPaymentHistory,
-  logPendingTransaction,
   updateFeeMatrix,
   getFeeMatrix
 } = require('../controllers/paymentController');
-
-// 🛡️ Security Clearance Shields
 const { protect, adminGate } = require('../middleware/authMiddleware');
 
+// Webhook must process raw body prior to standard JSON parsing
 router.post(
   '/webhook', 
   express.raw({ type: 'application/json' }), 
   handlePaystackWebhook
 );
 
+// Public / Protected Endpoints
 router.get('/fee-matrix', getFeeMatrix);
+router.post('/initialize', protect, express.json(), initializePayment);
+router.post('/verify', protect, express.json(), verifyTransactionReference);
 
-router.post(
-  '/verify', 
-  protect, 
-  express.json(), 
-  verifyTransactionReference
-);
-
-router.post(
-  '/update-fee-matrix', 
-  protect, 
-  adminGate, 
-  express.json(), 
-  updateFeeMatrix
-);
-
-router.get(
-  '/history', 
-  protect, 
-  adminGate, 
-  getPaymentHistory
-);
+// Administrative Endpoints
+router.post('/update-fee-matrix', protect, adminGate, express.json(), updateFeeMatrix);
+router.get('/history', protect, adminGate, getPaymentHistory);
 
 module.exports = router;

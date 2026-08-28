@@ -3,13 +3,13 @@ const dotenv = require('dotenv');
 const path = require('path');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const dns = require('dns'); // 👈 1. Import the native DNS module
+const dns = require('dns'); 
 
-// 👇 FIX: Force dotenv to look in the exact directory of this file
 dotenv.config({ path: path.join(__dirname, '.env') });
 
-// Set global DNS servers to Google to bypass local ISP timeouts
-dns.setServers(['8.8.8.8', '8.8.4.4']); // 👈 2. Add this line right here!
+// Global DNS servers to bypass local ISP timeouts
+dns.setServers(['8.8.8.8', '8.8.4.4']); 
+
 // App Routers
 const studentRoutes = require('./routes/student'); 
 const notificationRoutes = require('./routes/notification'); 
@@ -25,13 +25,12 @@ const levelRoutes = require('./routes/levelRoutes');
 const app = express();
 const PORT = process.env.PORT || 10000; 
 
-// Professional Security Alignment: Dynamic Vite & Local Port Matrix Whitelisting
+// Dynamic Origin Whitelisting
 app.use(cors({
   origin: [
     'http://localhost:3000', 
     'http://localhost:5173', 
     'http://localhost:5174', 
-    // process.env.FRONTEND_URL, 
     process.env.CLIENT_URL,
     process.env.ADMIN_URL   
   ].filter(Boolean),          
@@ -45,15 +44,23 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Database Lifecycle
+// Database Lifecycle with Auto Index Cleanup
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/hostel_db', {
       serverSelectionTimeoutMS: 5000, 
       socketTimeoutMS: 45000,
-      
     });
     console.log(`\x1b[38;5;208mMongoDB Connected: ${conn.connection.host}\x1b[0m`);
+
+    // AUTO-PURGE LEGACY INDEX (Solves the E11000 matrix crash)
+    try {
+      await conn.connection.db.collection('feeconfigs').dropIndex('narration_1');
+      console.log('\x1b[32m[DB Maintenance] Successfully dropped legacy narration_1 index.\x1b[0m');
+    } catch (err) {
+      // Index is already removed or does not exist — safe to ignore
+    }
+
   } catch (error) {
     console.error(`\x1b[31mMongoDB Connection Error: ${error.message}\x1b[0m`);
     process.exit(1);
@@ -76,7 +83,7 @@ const startServer = async () => {
   app.use('/api/levels', levelRoutes);
 
   // Fallbacks & 404 Handler
-  app.use((req, res, next) => {
+  app.use((req, res) => {
     res.status(404).json({ success: false, message: `API Route Not Found: ${req.method} ${req.originalUrl}` });
   });
 
@@ -94,8 +101,8 @@ const startServer = async () => {
   });
 };
 
-// 🛡️ CRITICAL FAULT TOLERANCE MATRIX LAYER
-process.on('unhandledRejection', (reason, promise) => {
+// Fault Tolerance Matrix Layer
+process.on('unhandledRejection', (reason) => {
   console.error('\x1b[33m[Anti-Crash Guard] Unhandled Rejection intercepted:\x1b[0m', reason);
 });
 

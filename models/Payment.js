@@ -21,12 +21,19 @@ const paymentSchema = new mongoose.Schema({
   },
   amount: {
     type: Number, 
-    required: true 
+    required: true // Stored base amount (e.g., 100)
+  },
+  paystackFee: {
+    type: Number,
+    default: 0 // Optional: Stores the fee (e.g., 1.53)
+  },
+  totalPaid: {
+    type: Number // Optional: Stores gross paid (e.g., 101.53)
   },
   status: {
     type: String,
     enum: ['success', 'failed', 'pending'],
-    default: 'success'
+    default: 'pending' // Recommended: start as 'pending' until verified
   },
   narration: {
     type: String,
@@ -38,6 +45,7 @@ const paymentSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
+    enum: ['100L', '200L', '300L', '400L', '500L', '600L'], // Matched with FeeConfig
     default: '100L'
   },
   academicYear: {
@@ -53,8 +61,7 @@ const paymentSchema = new mongoose.Schema({
     default: 'N/A'
   },
   paidAt: {
-    type: Date,
-    default: Date.now
+    type: Date
   }
 }, { 
   timestamps: true 
