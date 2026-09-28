@@ -1,9 +1,14 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+/**
+ * @file adminController.js
+ * @description Enterprise Administrative Controller handling provisioning, session management,
+ * identity approval pipelines, student lifecycle progression, and dashboard metrics.
+ */
+
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
 
-// Data Layer Model Injections
+// Data Models
 const Admin = require('../models/Admin');
 const User = require('../models/Student');
 const Meeting = require('../models/Meeting');
@@ -11,46 +16,180 @@ const Announcement = require('../models/Announcement');
 const Event = require('../models/Event');
 const Notification = require('../models/Notification');
 
-// Array structural definition for institutional year progression matches
+// ==========================================
+// CONFIGURATION & CONSTANTS
+// ==========================================
+
 const LEVEL_PROGRESSION = ['100L', '200L', '300L', '400L', '500L'];
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_admin_secret_key';
+const TOKEN_EXPIRY = process.env.JWT_EXPIRES_IN || '7d';
 
 // ==========================================
-// INTERNAL EMAIL HELPER ENGINE
+// UTILITIES & HELPERS
 // ==========================================
+
+/**
+ * Escapes special characters for dynamic RegExp queries.
+ * @param {string} text - Raw input string.
+ * @returns {string} Sanitized string safe for regular expression matching.
+ */
+const escapeRegex = (text) => text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+
+/**
+ * Standardized API response dispatcher.
+ */
+const sendResponse = (res, statusCode, success, message, data = null, extra = {}) => {
+  if (!res || typeof res.status !== 'function') {
+    console.log(`[System Message]: ${message}`);
+    return;
+  }
+  const payload = { success, message, ...extra };
+  if (data !== null) payload.data = data;
+  return res.status(statusCode).json(payload);
+};
+
+/**
+ * Async wrapper eliminating repetitive try-catch blocks in controller routes.
+ */
+const catchAsync = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch((err) => {
+    console.error(`❌ [System Error] ${fn.name}:`, err);
+
+    if (typeof next !== 'function') return;
+    if (res && res.headersSent) return next(err);
+
+    if (res && typeof res.status === 'function') {
+      return res.status(500).json({
+        success: false,
+        message: 'An unexpected internal server error occurred.',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
+    }
+  });
+};
+
+// ==========================================
+// HTML TEMPLATE GENERATORS
+// ==========================================
+
+const generateApprovalEmailHtml = (user, loginLink, code, magicLink, otpPageLink) => `
+  <div style="font-family: system-ui, -apple-system, sans-serif; padding: 24px; color: #1f2937; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+    <h2 style="color: #8b4513; border-bottom: 2px solid #f3f4f6; padding-bottom: 12px; margin-top: 0;">Portal Access Granted</h2>
+    <p>Hello <strong>${user.fullName}</strong>,</p>
+    <p>Your registration has been formally approved by the administration. To complete your activation, verify your account using the authorization code below:</p>
+    <div style="text-align: center; margin: 32px 0;">
+      <span style="font-size: 36px; font-weight: 800; letter-spacing: 8px; background: #f9fafb; padding: 16px 32px; border-radius: 8px; border: 2px dashed #8b4513; color: #8b4513;">${code}</span>
+    </div>
+    <div style="text-align: center; margin: 24px 0; display: flex; flex-direction: column; gap: 12px; align-items: center;">
+      <a href="${magicLink}" style="display: block; width: 80%; padding: 14px 20px; background-color: #8b4513; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; text-align: center;">Authenticate Automatically</a>
+      <a href="${otpPageLink}" style="display: block; width: 80%; padding: 14px 20px; background-color: #ffffff; color: #8b4513; text-decoration: none; border-radius: 6px; font-weight: 600; border: 1px solid #8b4513; text-align: center;">Enter Code Manually</a>
+    </div>
+    <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+    <p style="font-size: 12px; color: #6b7280; text-align: center;">If buttons are unresponsive, access the portal directly at: <a href="${loginLink}" style="color: #8b4513;">${loginLink}</a></p>
+  </div>
+`;
+
+const renderErrorScreen = (title, message) => `
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} | Portal Error</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; background-color: #fef2f2; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+      .card { max-width: 450px; width: 100%; background: #ffffff; padding: 32px; border: 1px solid #fecaca; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(220, 38, 38, 0.1); text-align: center; }
+      h1 { margin: 0 0 16px; font-size: 22px; color: #991b1b; }
+      p { font-size: 14px; line-height: 1.6; color: #7f1d1d; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${title}</h1>
+      <p>${message}</p>
+    </div>
+  </body>
+  </html>
+`;
+
+const renderClearanceScreen = (user) => `
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identity Authorization Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-[#041004] text-gray-100 flex items-center justify-center p-4 antialiased font-sans">
+    <div class="w-full max-w-md bg-white text-gray-900 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+      <div class="bg-[#8b4513] px-6 py-5 text-center text-white">
+        <h2 class="text-lg font-bold tracking-wider uppercase text-amber-400">Security Clearance Gateway</h2>
+        <p class="text-xs text-amber-100/90 mt-1">Altar Servers Association Portal</p>
+      </div>
+      <div class="p-6 space-y-6">
+        <p class="text-sm text-gray-600 text-center leading-relaxed">
+          Verify member registration metadata before authorizing primary workspace privileges.
+        </p>
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-4">
+          <div>
+            <label class="text-[11px] font-bold text-gray-400 uppercase tracking-widest block">Full Member Name</label>
+            <p class="text-lg font-extrabold text-gray-800 mt-0.5">${user.fullName}</p>
+          </div>
+          <div class="border-t border-gray-200 pt-3">
+            <label class="text-[11px] font-bold text-gray-400 uppercase tracking-widest block">Primary Electronic Mail</label>
+            <p class="text-base font-semibold text-gray-700 mt-0.5 break-all">${user.email}</p>
+          </div>
+          <div class="border-t border-gray-200 pt-3">
+            <label class="text-[11px] font-bold text-gray-400 uppercase tracking-widest block">Mobile Access Contact</label>
+            <p class="text-base font-bold text-emerald-800 mt-0.5">${user.phoneNumber || 'Not provided'}</p>
+          </div>
+        </div>
+        <form action="/api/admin/finalize-approval-execution/${user._id}" method="POST" class="pt-2">
+          <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 px-4 rounded-xl shadow-md transition-all duration-150 transform active:scale-95 cursor-pointer text-center text-base tracking-wide">
+            Confirm & Authorize Member Access
+          </button>
+        </form>
+        <div class="text-center pt-2">
+          <p class="text-[11px] text-gray-400 font-medium uppercase tracking-wide">
+            System Administrator Control &copy; ${new Date().getFullYear()}
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+  </html>
+`;
+
+// ==========================================
+// MAIL SERVICE
+// ==========================================
+
 const sendStudentEmail = async (user, loginLink, code, magicLink, otpPageLink) => {
   try {
+    const { GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, ASSOCIATION_EMAIL } = process.env;
+
+    if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
+      console.warn('⚠️ [Mail Service]: Missing OAuth2 environment configurations. Email skipped.');
+      return;
+    }
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GMAIL_CLIENT_ID,
-      process.env.GMAIL_CLIENT_SECRET,
-      "https://developers.google.com/oauthplayground"
+      GMAIL_CLIENT_ID,
+      GMAIL_CLIENT_SECRET,
+      'https://developers.google.com/oauthplayground'
     );
 
-    oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+    oauth2Client.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    const subject = "Account Approved!";
+    const subject = 'Account Approved!';
     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
-    
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #f0f0f0; border-radius: 8px;">
-        <h2 style="color: #8b4513; border-bottom: 2px solid #8b4513; padding-bottom: 10px;">Account Approved!</h2>
-        <p>Hello <strong>${user.fullName}</strong>,</p>
-        <p>Your account has been approved by the admin! To complete your registration, please verify your email using the code below:</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f4f4f4; padding: 10px 20px; border-radius: 5px; border: 1px dashed #8b4513; color: #8b4513;">${code}</span>
-        </div>
-        <p style="text-align: center;">Choose your verification method:</p>
-        <div style="text-align: center; margin: 20px 0; display: flex; justify-content: center; gap: 10px;">
-          <a href="${magicLink}" style="display: inline-block; padding: 12px 20px; background-color: #8b4513; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin: 5px;">Automatic Login</a>
-          <a href="${otpPageLink}" style="display: inline-block; padding: 12px 20px; background-color: #ffffff; color: #8b4513; text-decoration: none; border-radius: 5px; font-weight: bold; border: 1px solid #8b4513; margin: 5px;">Enter Code Manually</a>
-        </div>
-        <p>If the buttons above do not work, please visit the portal and use the code provided.</p>
-        <p style="font-size: 13px; color: #666;">Once verified, you can access your dashboard here: <a href="${loginLink}" style="color: #8b4513;">${loginLink}</a></p>
-      </div>
-    `;
+    const htmlContent = generateApprovalEmailHtml(user, loginLink, code, magicLink, otpPageLink);
 
     const messageParts = [
-      `From: Altar Server Association <${process.env.ASSOCIATION_EMAIL}>`,
+      `From: Altar Server Association <${ASSOCIATION_EMAIL || 'noreply@association.org'}>`,
       `To: ${user.email}`,
       'Content-Type: text/html; charset=utf-8',
       'MIME-Version: 1.0',
@@ -59,77 +198,145 @@ const sendStudentEmail = async (user, loginLink, code, magicLink, otpPageLink) =
       htmlContent
     ];
 
-    const message = messageParts.join('\n');
-    const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const encodedMessage = Buffer.from(messageParts.join('\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
     await gmail.users.messages.send({ userId: 'me', requestBody: { raw: encodedMessage } });
   } catch (error) {
-    console.error("Gmail API Error:", error.message);
-    throw new Error("Email delivery failed, but account state was updated.");
+    console.error(`❌ [Mail Service Exception] Failed to dispatch approval email to ${user.email}:`, error.message);
   }
 };
-
-const renderErrorScreen = (title, message) => `
-  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border: 1px solid #f5c6cb; border-radius: 12px; background-color: #f8d7da; color: #721c24; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-    <h1 style="margin-top: 0; font-size: 24px;">${title}</h1>
-    <hr style="border: 0; height: 1px; background: #f5c6cb; margin: 15px 0;" />
-    <p style="font-size: 15px; line-height: 1.5;">${message}</p>
-  </div>
-`;
 
 // ==========================================
 // 1. ADMINISTRATIVE AUTHENTICATION ENGINE
 // ==========================================
 
-exports.signup = async (req, res) => {
-  try {
-    const { fullName, email, password } = req.body;
-    if (!fullName || !email || !password) {
-      return res.status(400).json({ success: false, message: 'All operational fields are mandatory.' });
-    }
-    const adminExists = await Admin.findOne({ email: email.toLowerCase().trim() });
-    if (adminExists) {
-      return res.status(400).json({ success: false, message: 'An administrator account with this email already exists.' });
-    }
-    const admin = await Admin.create({
-      fullName: fullName.trim(),
-      email: email.toLowerCase().trim(),
-      password, 
-    });
-    const adminResponse = admin.toObject();
-    delete adminResponse.password;
-    return res.status(201).json({ success: true, message: 'Administrative profile provisioned successfully.', admin: adminResponse });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: 'Internal Server Error: ' + err.message });
+exports.signup = catchAsync(async (req, res) => {
+  const { fullName, email, password } = req.body;
+
+  if (!fullName?.trim() || !email?.trim() || !password) {
+    return sendResponse(res, 400, false, 'All parameters (fullName, email, password) are mandatory.');
   }
-};
 
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email credentials and password verification strings are required.' });
-    }
-    const admin = await Admin.findOne({ email: email.toLowerCase().trim() }).select('+password');
-    if (!admin) return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
-    const isMatch = await admin.matchPassword(password);
-    if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid administrative credentials provided.' });
-
-    const token = jwt.sign(
-      { id: admin._id, email: admin.email, role: 'admin' },
-      process.env.JWT_SECRET || 'fallback_admin_secret_key',
-      { expiresIn: '7d' }
-    );
-    const adminResponse = admin.toObject();
-    delete adminResponse.password;
-    return res.status(200).json({ success: true, message: 'Administrative session authenticated successfully.', token, admin: adminResponse });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: 'Internal Server Error: ' + err.message });
+  if (password.length < 8) {
+    return sendResponse(res, 400, false, 'Password must be at least 8 characters long.');
   }
-};
 
-// ==========================================
-// 2. DATA REGISTRY ROSTER WORKBOOKS
-// ==========================================
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const adminExists = await Admin.findOne({ email: normalizedEmail });
+  if (adminExists) {
+    return sendResponse(res, 409, false, 'An administrator account with this email already exists.');
+  }
+
+  const admin = await Admin.create({
+    fullName: fullName.trim(),
+    email: normalizedEmail,
+    password,
+    mustChangePassword: false
+  });
+
+  const adminResponse = admin.toObject();
+  delete adminResponse.password;
+
+  return sendResponse(res, 201, true, 'Administrative profile provisioned successfully.', adminResponse);
+});
+
+exports.login = catchAsync(async (req, res) => {
+  const { email, password } = req.body;
+  const invalidMsg = 'Invalid administrative credentials provided.';
+
+  if (!email?.trim() || !password) {
+    return sendResponse(res, 400, false, 'Email credentials and password verification strings are required.');
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  const admin = await Admin.findOne({ email: cleanEmail }).select('+password');
+
+  if (!admin) {
+    return sendResponse(res, 401, false, invalidMsg);
+  }
+
+  const isMatch = await admin.matchPassword(password);
+  if (!isMatch) {
+    return sendResponse(res, 401, false, invalidMsg);
+  }
+
+  const token = jwt.sign(
+    { id: admin._id, email: admin.email, role: admin.role || 'admin' },
+    JWT_SECRET,
+    { expiresIn: TOKEN_EXPIRY }
+  );
+
+  const adminResponse = admin.toObject();
+  delete adminResponse.password;
+
+  return res.status(200).json({
+    success: true,
+    message: 'Administrative session authenticated successfully.',
+    token,
+    data: adminResponse
+  });
+});
+
+exports.changeCredentials = catchAsync(async (req, res) => {
+  const { newEmail, newPassword } = req.body;
+  const adminId = req.user?.id || req.user?._id?.toString();
+
+  if (!adminId) {
+    return sendResponse(res, 401, false, 'Unauthorized session state: Missing administrator profile ID.');
+  }
+
+  if (!newEmail?.trim() || !newPassword) {
+    return sendResponse(res, 400, false, 'Both structural parameters (newEmail and newPassword) are required.');
+  }
+
+  if (newPassword.length < 8) {
+    return sendResponse(res, 400, false, 'New password must be at least 8 characters long.');
+  }
+
+  const cleanEmail = newEmail.toLowerCase().trim();
+
+  const emailInUse = await Admin.findOne({ email: cleanEmail, _id: { $ne: adminId } });
+  if (emailInUse) {
+    return sendResponse(res, 400, false, 'Target email address is already assigned to another administrative profile.');
+  }
+
+  const admin = await Admin.findById(adminId).select('+password');
+  if (!admin) {
+    return sendResponse(res, 404, false, 'Administrative context not resolved.');
+  }
+
+  const isSamePassword = await admin.matchPassword(newPassword);
+  if (isSamePassword) {
+    return sendResponse(res, 400, false, 'New password cannot be identical to the temporary default password.');
+  }
+
+  admin.email = cleanEmail;
+  admin.password = newPassword;
+  admin.mustChangePassword = false;
+
+  await admin.save();
+
+  const freshToken = jwt.sign(
+    { id: admin._id, email: admin.email, role: admin.role || 'admin' },
+    JWT_SECRET,
+    { expiresIn: TOKEN_EXPIRY }
+  );
+
+  const adminResponse = admin.toObject();
+  delete adminResponse.password;
+
+  return res.status(200).json({
+    success: true,
+    message: 'Security credentials hardened successfully. Full dashboard access granted.',
+    token: freshToken,
+    data: adminResponse
+  });
+});
 
 exports.findStudentByRegistryId = async (req, res) => {
   try {

@@ -1,109 +1,148 @@
-/**
- * @file authMiddleware.js
- * @description Dual-Entity authentication shield and role-based clearance inspector.
- */
-
 const jwt = require('jsonwebtoken');
 const Admin = require('../models/Admin');
-const Student = require('../models/Student'); 
+const Student = require('../models/Student');
 
 const protect = async (req, res, next) => {
-  let token;
+  const authHeader = req.headers.authorization;
 
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      token = req.headers.authorization.split(' ')[1];
-
-      if (!process.env.JWT_SECRET) {
-        console.error("🚨 [Critical] JWT_SECRET is missing from environment variables.");
-        return res.status(500).json({ message: 'Internal server configuration error' });
-      }
-
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      // 1. Primary Authorization Probe (Admin Check)
-      req.admin = await Admin.findById(decoded.id).select('-password');
-
-      // 2. Secondary Safety Bridge Fallback (Student Check)
-      if (!req.admin) {
-        const studentUser = await Student.findById(decoded.id).select('-password');
-        
-        if (studentUser) {
-          req.admin = studentUser; // Retained to preserve legacy request object mappings
-          req.isStudent = true;    // Explicit context flag for identification down the pipeline
-        }
-      }
-
-      // 3. Absolute Context Final Gate
-      if (!req.admin) {
-        return res.status(401).json({ message: 'Not authorized, account no longer exists' });
-      }
-
-      // 🛠️ THE CRITICAL BRIDGE FIX: 
-      // Controllers look for req.user, so we must safely map req.admin to req.user
-      req.user = req.admin; 
-
-      return next();
-    } catch (error) {
-      console.error(`❌ [Auth Error]: ${error.name} - ${error.message}`);
-      return res.status(401).json({ 
-        message: error.name === 'TokenExpiredError' ? 'Session expired' : 'Not authorized, token invalid' 
-      });
-    }
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Access Denied: Missing or malformed authorization token.' 
+    });
   }
 
-  if (!token) {
-    return res.status(401).json({ message: 'Not authorized, no token provided' });
+  const token = authHeader.split(' ')[1];
+
+  if (!process.env.JWT_SECRET) {
+    console.error('🚨 [CRITICAL CONFIGURATION ERROR]: JWT_SECRET is undefined in deployment environment variables.');
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server configuration runtime failure.' 
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Concurrent entity profiling to avoid synchronous database blocking operations
+    const [adminResult, studentResult] = await Promise.allSettled([
+      Admin.findById(decoded.id).select('-password').lean(),
+      Student.findById(decoded.id).select('-password').lean()
+    ]);
+
+    const activeAdmin = adminResult.status === 'fulfilled' ? adminResult.value : null;
+    const activeStudent = studentResult.status === 'fulfilled' ? studentResult.value : null;
+
+    if (activeAdmin) {
+      req.user = {
+        ...activeAdmin,
+        id: decoded.id || activeAdmin._id.toString() // Re-inject normalized string ID stripped by .lean()
+      };
+      req.isAdmin = true;
+      req.isStudent = false;
+
+      // Security Lock: Hard boundary forcing admins to change temporary default credentials
+      const isRequestingCredentialChange = req.originalUrl.includes('/change-credentials');
+
+      if (activeAdmin.mustChangePassword && !isRequestingCredentialChange) {
+        return res.status(403).json({
+          success: false,
+          code: 'CREDENTIALS_UPDATE_REQUIRED',
+          message: 'Security Lock: Mandatory administrative credential update pending. Please update your credentials to continue.'
+        });
+      }
+    } else if (activeStudent) {
+      req.user = {
+        ...activeStudent,
+        id: decoded.id || activeStudent._id.toString()
+      };
+      req.isAdmin = false;
+      req.isStudent = true;
+    } else {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Authorization Terminated: Registered target principal no longer exists in database.' 
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error(`❌ [Authentication Pipeline Fault]: ${error.name} -> ${error.message}`);
+
+    const isExpired = error.name === 'TokenExpiredError';
+    return res.status(401).json({
+      success: false,
+      code: isExpired ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+      message: isExpired ? 'Session timeout reached. Please authenticate again.' : 'Access Denied: Security token validation failed.'
+    });
   }
 };
 
 const adminGate = (req, res, next) => {
-  // Hard blocker ensuring student identities masquerading as req.admin are denied permission
-  if (req.admin && req.admin.role === 'admin' && !req.isStudent) {
+  const allowedRoles = ['admin', 'superadmin'];
+
+  if (req.user && req.isAdmin && allowedRoles.includes(req.user.role)) {
     return next();
   }
-  
-  return res.status(403).json({ 
-    success: false, 
-    message: 'Access Denied: High-level administrative clearance privileges required.' 
+
+  return res.status(403).json({
+    success: false,
+    code: 'FORBIDDEN_PRIVILEGES',
+    message: 'Access Denied: Operation requires elevated administrative privileges.'
   });
 };
+
 const paymentGate = (req, res, next) => {
-  // 1. Ensure the user object exists from the 'protect' middleware
-  const user = req.user;
+  const { user, isStudent, isAdmin } = req;
+
   if (!user) {
-    return res.status(401).json({ message: 'Authentication required for clearance check.' });
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Access Denied: Valid user session context required for financial appraisal.' 
+    });
   }
 
-  // 2. Bypass check if it's an Admin masquerading or performing administrative overrides
-  if (user.role === 'admin' && !req.isStudent) {
+  // System Administrative Override Bypass Rule
+  const allowedAdminRoles = ['admin', 'superadmin'];
+  if (isAdmin && allowedAdminRoles.includes(user.role)) {
     return next();
   }
 
-  // 3. Extract target session/level from request body or query parameters
-  const targetYear = req.body.academicYear || req.query.academicYear || "2025/2026";
-  const targetLevel = req.body.level || req.user.currentLevel;
+  // Runtime context parameters mapping configuration targets
+  const currentYear = new Date().getFullYear();
+  const fallbackAcademicYear = `${currentYear}/${currentYear + 1}`;
 
-  // 4. Inspect the Entitlement Ledger
-  const clearanceRecord = user.sessionClearance?.find(
-    record => record.academicYear === targetYear && record.level === targetLevel
+  const targetYear = req.body?.academicYear || req.query?.academicYear || fallbackAcademicYear;
+  const targetLevel = req.body?.level || req.query?.level || user.currentLevel;
+
+  if (!user.sessionClearance || !Array.isArray(user.sessionClearance)) {
+    return res.status(403).json({
+      success: false,
+      code: 'CLEARANCE_LEDGER_MISSING',
+      message: 'Access Denied: Financial verification record matrix is empty for this profile.'
+    });
+  }
+
+  // Query database array structure for matching structural configurations
+  const activeClearance = user.sessionClearance.find(
+    (record) => record.academicYear === targetYear && record.level === targetLevel
   );
 
-  // 5. Enforcement Blocker
-  if (!clearanceRecord || clearanceRecord.paymentStatus !== 'Unlocked') {
+  // Status Check Validation Guard
+  if (!activeClearance || activeClearance.paymentStatus !== 'Unlocked') {
     return res.status(403).json({
       success: false,
       code: 'PAYMENT_REQUIRED',
-      message: `Access Denied: Sessional dues for ${targetLevel} (${targetYear}) must be settled to unlock this portal.`
+      message: `Access Blocked: Association sessional dues for ${targetLevel} (${targetYear}) must be settled to unlock this portal workspace access.`
     });
   }
 
   return next();
 };
 
-module.exports = { 
-  protect, 
+module.exports = {
+  protect,
   adminGate,
-  paymentGate // 👈 Don't forget to export the new shield
+  paymentGate
 };
-

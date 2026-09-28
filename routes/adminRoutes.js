@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const adminController = require('../controllers/adminController');
-const meetingController = require('../controllers/meetingController'); // 🚀 Explicit import prevents 404s
+const meetingController = require('../controllers/meetingController'); 
 const assignmentController = require('../controllers/assignmentController'); 
 const announcementRoutes = require('./announcementRoutes');
 const authMiddleware = require('../middleware/authMiddleware');
@@ -29,6 +29,8 @@ const createSafeHandler = (handler, endpointName) => {
 // ==========================================
 router.post('/signup', createSafeHandler(adminController.signup, 'signup'));
 router.post('/login', createSafeHandler(adminController.login, 'login'));
+// 🚀 New credentials swap pipeline
+router.post('/change-credentials', protect, createSafeHandler(adminController.changeCredentials, 'changeCredentials'));
 
 router.get('/dashboard-stats', protect, createSafeHandler(adminController.getDashboardStats, 'getDashboardStats'));
 router.get('/students', protect, createSafeHandler(adminController.getAllStudents, 'getAllStudents'));
@@ -49,20 +51,17 @@ router.put('/update-student-status/:studentId', protect, createSafeHandler(admin
 // ==========================================
 // MEETING & ATTENDANCE MANAGEMENT
 // ==========================================
-// 1. Root collection endpoints & legacy list support
 router.get('/meetings-list', protect, createSafeHandler(meetingController.getMeetingsList, 'getMeetingsList'));
 router.route('/meetings')
   .get(protect, createSafeHandler(meetingController.getMeetingsList, 'getMeetingsList'))
   .post(protect, createSafeHandler(meetingController.createMeeting, 'createMeeting'));
 
-// 2. Specific action endpoints must precede generic resource IDs
 router.put(
   '/meetings/:meetingId/toggle-attendance', 
   protect, 
   createSafeHandler(meetingController.toggleAttendance, 'toggleAttendance')
 ); 
 
-// 3. 🚀 Standard RESTful Resource Routes for Edit & Delete (Resolves the 404s)
 router.route('/meetings/:id')
   .put(protect, createSafeHandler(meetingController.updateMeeting, 'updateMeeting'))
   .delete(protect, createSafeHandler(meetingController.deleteMeeting, 'deleteMeeting'));
